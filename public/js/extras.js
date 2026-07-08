@@ -14,6 +14,9 @@
       .flx-btn:hover{border-color:var(--flamingo);color:var(--text)}
       .flx-btn:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
       .flx-btn .ok{color:var(--good)}
+      .flx-btn.quiet{background:transparent;color:var(--muted);font-weight:500;font-size:12.5px;
+        padding:5px 11px;border-color:var(--border);white-space:nowrap;flex:none}
+      .flx-btn.quiet:hover{color:var(--text);border-color:var(--teal)}
       .flx-trend{color:var(--muted);font-size:13px;margin:-6px 0 14px;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline}
       .flx-trend .lab{color:var(--dim)}
       .flx-trend .up{color:var(--good)}
@@ -138,15 +141,24 @@
         const main=(typeof mainEl!=="undefined"&&mainEl)||document.querySelector("#main");
         if(!main) return;
         if(document.getElementById("flx-print-btn")) return; // already present this render
-        const bar=document.createElement("div");
-        bar.className="flx-tools";
-        bar.innerHTML=`<button type="button" id="flx-print-btn" class="flx-btn" title="Open a printable one-page cheat-sheet">Print cheat-sheet</button>`;
-        // place it just after the ticker if present, else at the top of #main
-        const ticker=main.querySelector(".ticker");
-        if(ticker&&ticker.parentNode===main) ticker.insertAdjacentElement("afterend",bar);
-        else main.insertAdjacentElement("afterbegin",bar);
-        const btn=document.getElementById("flx-print-btn");
-        if(btn) btn.onclick=doPrint;
+        const btn=document.createElement("button");
+        btn.type="button"; btn.id="flx-print-btn"; btn.className="flx-btn quiet";
+        btn.title="Open a printable one-page cheat-sheet"; btn.textContent="Print cheat-sheet";
+        // preferred home: docked on the right of the statistical-anomaly bar
+        const ab=main.querySelector(".alertbar");
+        if(ab){
+          btn.onclick=function(ev){ ev.stopPropagation(); doPrint(); }; // don't trigger the bar's game link
+          ab.appendChild(btn);
+        }else{
+          // fallback: small tools row after the ticker
+          const bar=document.createElement("div");
+          bar.className="flx-tools";
+          bar.appendChild(btn);
+          btn.onclick=doPrint;
+          const ticker=main.querySelector(".ticker");
+          if(ticker&&ticker.parentNode===main) ticker.insertAdjacentElement("afterend",bar);
+          else main.insertAdjacentElement("afterbegin",bar);
+        }
         mounted=true;
       }catch(e){/* silent */}
     }

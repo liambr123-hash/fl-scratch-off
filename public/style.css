@@ -170,7 +170,8 @@ footer .disc{color:var(--muted);font-weight:500}
 .ticker .tsep{color:var(--flamingo);font-size:9px;padding:0 8px;vertical-align:1px}
 @keyframes tkscroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @media(prefers-reduced-motion:reduce){.ticker .tk{animation:none}}
-.alertbar{background:rgba(47,182,168,.1);border:1px solid rgba(47,182,168,.4);border-radius:10px;padding:9px 14px;font-size:13.5px;margin-bottom:12px;cursor:pointer}
+.alertbar{background:rgba(47,182,168,.1);border:1px solid rgba(47,182,168,.4);border-radius:10px;padding:9px 14px;font-size:13.5px;margin-bottom:12px;cursor:pointer;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.alertbar .ab-text{flex:1;min-width:220px}
 .alertbar:hover{border-color:var(--teal)}
 .mini.warnb{cursor:pointer;border-color:rgba(226,75,91,.4)}
 .lastchance .dlgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}

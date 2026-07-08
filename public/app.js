@@ -206,7 +206,7 @@ function overview(){
   ].join('<span class="tsep">◆</span>');
   mainEl.innerHTML=`
   <div class="ticker" aria-label="recent claims ticker"><div class="tk">${tickItems}<span class="tsep">◆</span>${tickItems}</div></div>
-  ${posEV.length?`<div class="alertbar" data-g="${posEV[0].game_no}"><b>Statistical anomaly:</b>&nbsp;${esc(posEV[0].game_name)} ($${Math.round(posEV[0].ticket_price)}) is currently Florida's only <b>positive-EV</b> scratch-off — ${f2(posEV[0].value_per_dollar_now)} back per $1. Caveat: ${pct(posEV[0].pct_value_remaining)} of value left, selling fast.</div>`:""}
+  ${posEV.length?`<div class="alertbar" data-g="${posEV[0].game_no}"><span class="ab-text"><b>Statistical anomaly:</b>&nbsp;${esc(posEV[0].game_name)} ($${Math.round(posEV[0].ticket_price)}) is currently Florida's only <b>positive-EV</b> scratch-off — ${f2(posEV[0].value_per_dollar_now)} back per $1. Caveat: ${pct(posEV[0].pct_value_remaining)} of value left, selling fast.</span></div>`:""}
   <div class="ministrip">
     <div class="mini"><b>${on.length}</b><span>games<br>on sale</span></div>
     <div class="mini"><b>${money(valLeft)}</b><span>prize money<br>remaining</span></div>
