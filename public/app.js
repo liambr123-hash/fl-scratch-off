@@ -60,6 +60,14 @@ const oddsF=v=>v==null?"—":"1 in "+(+v).toLocaleString(undefined,{maximumFract
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const anon=n=>/EXEMPT/.test(n||"");
 
+/* ---------- extension registry (feature modules in js/ register here) ----------
+   FLX.routes[name] = fn(arg)        -> extra hash routes, e.g. #compare/1518,1555
+   FLX.gameExtras[] = fn(g)          -> called after game detail renders; append panels to #main
+   FLX.ready[]      = fn()           -> called once after first route (data loaded)
+   'flx:view' CustomEvent on document after every route: detail={tab,arg}      */
+window.FLX={routes:{},gameExtras:[],ready:[],
+  css(str){const el=document.createElement("style");el.textContent=str;document.head.appendChild(el);}};
+
 /* ---------- charts registry ---------- */
 let charts=[];
 function newChart(el,cfg){if(!el)return null;const c=new Chart(el,cfg);charts.push(c);return c;}
@@ -76,7 +84,9 @@ function route(){
   document.querySelectorAll("nav button").forEach(b=>{b.classList.toggle("active",b.dataset.tab===tab);if(b.dataset.tab===tab)b.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"});});
   $("#nav-game").style.display=(tab==="game")?"":"none";
   clearCharts();
-  ({overview,tickets,game,winners,retailers,maps,insights}[tab]||overview)(arg);
+  const view={overview,tickets,game,winners,retailers,maps,insights}[tab]||FLX.routes[tab]||overview;
+  view(arg);
+  document.dispatchEvent(new CustomEvent("flx:view",{detail:{tab,arg}}));
   window.scrollTo(0,0);
 }
 window.addEventListener("hashchange",route);
@@ -192,11 +202,11 @@ function overview(){
   const tickItems=[
     ...recent.slice(0,6).map(w=>`<span class="ti" data-g="${w[0]}">${money(w[6])} claimed · ${esc(w[3]||"FL")} · ${esc(GAME_NAME[w[0]]||"")}</span>`),
     `<span class="ti">${G.filter(g=>g.on_sale&&g.top_prize_value_num>=25e6&&g.top_prizes_remaining>0).reduce((s,g)=>s+g.top_prizes_remaining,0)} × $25M jackpots still unclaimed</span>`,
-    ...(posEV.length?[`<span class="ti" data-g="${posEV[0].game_no}">⚡ ${esc(posEV[0].game_name)} is positive-EV (${f2(posEV[0].value_per_dollar_now)}/$)</span>`]:[])
+    ...(posEV.length?[`<span class="ti" data-g="${posEV[0].game_no}">${esc(posEV[0].game_name)} is positive-EV (${f2(posEV[0].value_per_dollar_now)}/$)</span>`]:[])
   ].join('<span class="tsep">◆</span>');
   mainEl.innerHTML=`
   <div class="ticker" aria-label="recent claims ticker"><div class="tk">${tickItems}<span class="tsep">◆</span>${tickItems}</div></div>
-  ${posEV.length?`<div class="alertbar" data-g="${posEV[0].game_no}"><b>⚡ Statistical anomaly:</b>&nbsp;${esc(posEV[0].game_name)} ($${Math.round(posEV[0].ticket_price)}) is currently Florida's only <b>positive-EV</b> scratch-off — ${f2(posEV[0].value_per_dollar_now)} back per $1. Caveat: ${pct(posEV[0].pct_value_remaining)} of value left, selling fast.</div>`:""}
+  ${posEV.length?`<div class="alertbar" data-g="${posEV[0].game_no}"><b>Statistical anomaly:</b>&nbsp;${esc(posEV[0].game_name)} ($${Math.round(posEV[0].ticket_price)}) is currently Florida's only <b>positive-EV</b> scratch-off — ${f2(posEV[0].value_per_dollar_now)} back per $1. Caveat: ${pct(posEV[0].pct_value_remaining)} of value left, selling fast.</div>`:""}
   <div class="ministrip">
     <div class="mini"><b>${on.length}</b><span>games<br>on sale</span></div>
     <div class="mini"><b>${money(valLeft)}</b><span>prize money<br>remaining</span></div>
@@ -218,16 +228,8 @@ function overview(){
       ${freshv.slice(0,3).map((g,i)=>tix(g,i+1,"fresh")).join("")}
       <span class="more" data-go="fresh">all fresh games ↓</span></div>
   </div>
-  ${dl.length?`<div class="panel lastchance"><h2>⏳ Last chance <span class="hint">tickets from ended games become worthless after the redemption deadline</span></h2>
-    <div class="dlgrid">${dl.map(d=>{
-      const days=Math.ceil((new Date(d.last_redeem)-today)/864e5);
-      const cls=days<=21?"crit":days<=45?"low":"";
-      return `<div class="dlcard ${cls}"><div class="nm">${esc(d.name)} <span class="dim">$${d.price}</span></div>
-        <div class="meta">stopped selling ${d.last_sell}</div>
-        <div class="cd">${days>0?days+" days to redeem":"EXPIRED"}</div>
-        <div class="meta">deadline ${d.last_redeem}</div></div>`}).join("")}</div></div>`:""}
-  <div class="panel" id="sec-avoid"><h2>🚫 Dead money — avoid <span class="hint">on sale, but the advertised top prize is already gone</span></h2><div id="avoidT"></div></div>
-  <div class="panel" id="sec-wiz"><h2>🎯 Pick a ticket for me</h2>
+  <div class="panel" id="sec-avoid"><h2>Dead money — avoid <span class="hint">on sale, but the advertised top prize is already gone</span></h2><div id="avoidT"></div></div>
+  <div class="panel" id="sec-wiz"><h2>Pick a ticket for me</h2>
     <div class="controls">
       <div class="seg" id="wbudget"><button data-v="0" class="active">Any $</button><button data-v="1">$1–2</button><button data-v="5">$3–5</button><button data-v="10">$10</button><button data-v="20">$20–50</button></div>
       <div class="seg" id="wgoal"><button data-v="value" class="active">Best value</button><button data-v="dream">Dream big</button><button data-v="often">Win something</button></div>
@@ -239,7 +241,16 @@ function overview(){
   <div class="grid2">
     <div class="panel" id="sec-jack"><h2>Biggest jackpots still out there</h2><div id="jack"></div></div>
     <div class="panel" id="sec-fresh"><h2>Freshest games <span class="hint">most prize value left</span></h2><div id="fresh"></div></div>
-  </div>`;
+  </div>
+  ${dl.length?`<div class="panel lastchance"><h2>Redemption reminders <span class="hint">friendly heads-up — ended games keep paying until their redemption deadline</span></h2>
+    <p class="mut" style="font-size:13px;margin-bottom:10px">If you have old tickets from these ended games lying around, cash them before the deadline. No rush if you don't.</p>
+    <div class="dlgrid">${dl.map(d=>{
+      const days=Math.ceil((new Date(d.last_redeem)-today)/864e5);
+      return `<div class="dlcard"><div class="nm">${esc(d.name)} <span class="dim">$${d.price}</span></div>
+        <div class="meta">sales ended ${d.last_sell}</div>
+        <div class="cd">${days>0?"redeem by "+d.last_redeem:"expired"}</div>
+        <div class="meta">${days>0?days+" days remaining":""}</div></div>`}).join("")}</div></div>`:""}
+`;
   mainEl.querySelectorAll(".tix").forEach(t=>t.onclick=()=>go("game",t.dataset.g));
   mainEl.querySelectorAll(".more").forEach(m=>m.onclick=()=>{
     const id={best:"sec-best",jack:"sec-jack",fresh:"sec-fresh"}[m.dataset.go];
@@ -248,7 +259,7 @@ function overview(){
   const md=document.getElementById("mini-dead");
   if(md)md.onclick=()=>document.getElementById("sec-avoid")?.scrollIntoView({behavior:"smooth"});
   $("#avoidT").append(makeTable([
-    {k:"game_name",label:"Game",fmt:g=>esc(g.game_name)+deadBadge(g)},
+    {k:"game_name",label:"Game"},
     {k:"ticket_price",label:"Price",r:1,fmt:g=>"$"+Math.round(g.ticket_price)},
     {k:"top_prize_value_num",label:"Advertised top",r:1,hideM:1,fmt:g=>esc(g.top_prize_display||money(g.top_prize_value_num))},
     {k:"pct_value_remaining",label:"Value left",fmt:leftBar},
@@ -328,12 +339,12 @@ function game(no){
   if(!g){mainEl.innerHTML='<div class="panel">Unknown game.</div>';return;}
   const tiers=T[no]||[];
   const gw=W.filter(w=>w[0]===no);
-  const flag=g.data_quality?`<div class="flagnote">⚠ ${esc(g.data_quality)}</div>`:"";
+  const flag=g.data_quality?`<div class="flagnote">Note: ${esc(g.data_quality)}</div>`:"";
   mainEl.innerHTML=`
   <span class="back" onclick="history.back()">← back</span>
   <div class="gtitle">${esc(g.game_name)} <span class="dim">#${g.game_no}</span> ${salePill(g)}${deadBadge(g)} ${g.score!=null?scoreBadge(g):""}</div>
   <div class="gsub">$${Math.round(g.ticket_price)} ticket · top prize ${esc(g.top_prize_display||money(g.top_prize_value_num))}${CASH[no]&&g.top_prize_value_num>=1e6?` <span class="dim">(winners actually take ≈ ${money(g.top_prize_value_num*CASH[no])} cash)</span>`:""} · overall odds 1:${g.overall_odds_1_in??"?"}${g.profit_odds?` · profit odds 1 in ${g.profit_odds.toFixed(1)}`:""} · launched ${g.launch_date||"?"}${g.on_sale?"":" · ended "+g.end_date+(g.redemption_date?" · redeem by "+g.redemption_date:"")} · data ${esc(g.last_queried||"")}</div>
-  ${g.mil_left>0?`<div class="gsub" style="margin-top:-8px">💰 <b class="flamc">${g.mil_left}</b> prizes of $1,000,000+ still unclaimed in this game${g.sellout_days?` · at the current sales pace, est. sold out in ~${g.sellout_days>365?Math.round(g.sellout_days/30)+" months":g.sellout_days+" days"}`:""}</div>`:(g.sellout_days&&g.on_sale?`<div class="gsub" style="margin-top:-8px">est. sold out in ~${g.sellout_days>365?Math.round(g.sellout_days/30)+" months":g.sellout_days+" days"} at current pace</div>`:"")}
+  ${g.mil_left>0?`<div class="gsub" style="margin-top:-8px"><b class="flamc">${g.mil_left}</b> prizes of $1,000,000+ still unclaimed in this game${g.sellout_days?` · at the current sales pace, est. sold out in ~${g.sellout_days>365?Math.round(g.sellout_days/30)+" months":g.sellout_days+" days"}`:""}</div>`:(g.sellout_days&&g.on_sale?`<div class="gsub" style="margin-top:-8px">est. sold out in ~${g.sellout_days>365?Math.round(g.sellout_days/30)+" months":g.sellout_days+" days"} at current pace</div>`:"")}
   ${flag}
   <div class="cards">
     <div class="card"><div class="lab">EV per $1 now</div><div class="val ${g.value_per_dollar_now>=0.8?"good":""}">${f2(g.value_per_dollar_now)}</div><div class="note">design ${f2(g.value_per_dollar_original)}</div></div>
@@ -361,6 +372,7 @@ function game(no){
     options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,
       scales:{x:{stacked:true,max:100,ticks:{callback:v=>v+"%"}},y:{stacked:true}},
       plugins:{legend:{position:"bottom"}}}});
+  FLX.gameExtras.forEach(f=>{try{f(g)}catch(e){console.warn("gameExtra failed",e)}});
   if(gw.length){
     $("#winT").append(makeTable([
       {k:"1",label:"Claimed",fmt:w=>w[1]||"—",sortVal:w=>w[1]||""},
@@ -598,4 +610,6 @@ function insights(){
       plugins:{legend:{position:"bottom"},tooltip:{callbacks:{label:c=>` ${c.label}: $${c.raw}M remaining`}}}}});
 }
 
-route();
+function boot(){route();FLX.ready.forEach(f=>{try{f()}catch(e){console.warn("ready hook failed",e)}});}
+// defer first route to DOMContentLoaded so deferred feature modules register their hooks first
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot);else boot();
