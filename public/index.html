@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FL Scratch-Off Statistician</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 58'><ellipse cx='22' cy='33' rx='11.5' ry='8' fill='%23FF6F91'/><path d='M24 27 C 20 18, 30 14, 25.5 8' fill='none' stroke='%23FF6F91' stroke-width='5.4' stroke-linecap='round'/><circle cx='25.5' cy='8' r='3.6' fill='%23FF6F91'/><path d='M23 8.5 L16 11.5' stroke='%23E24B5B' stroke-width='3' stroke-linecap='round'/></svg>">
+<meta name="description" content="Independent Florida scratch-off statistics: live odds, prizes remaining, expected value, winners, and retailer analysis. Not affiliated with the Florida Lottery.">
+<meta property="og:title" content="Florida Scratch-Off Statistician">
+<meta property="og:description" content="Live odds, best-value tickets, jackpots remaining, winner maps, and a 13,500-store retailer analysis. Independent & free.">
+<meta property="og:type" content="website">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="44" height="58" viewBox="0 0 44 58" aria-hidden="true">
+      <!-- original minimalist flamingo silhouette (flat coral) -->
+      <g stroke="#FF6F91" stroke-width="2.6" stroke-linecap="round" fill="none">
+        <path d="M20 34 L20 53"/>
+        <path d="M25 34 L29 47 L26 53"/>
+      </g>
+      <ellipse cx="22" cy="33" rx="11.5" ry="8" fill="#FF6F91"/>
+      <path d="M24 27 C 20 18, 30 14, 25.5 8" fill="none" stroke="#FF6F91" stroke-width="5.4" stroke-linecap="round"/>
+      <circle cx="25.5" cy="8" r="3.6" fill="#FF6F91"/>
+      <path d="M23 8.5 L16 11.5" stroke="#E24B5B" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <h1>Florida Scratch-Off <em>Statistician</em></h1>
+      <span class="sub" id="meta-line"></span>
+    </div>
+  </div>
+  <div class="sunset"></div>
+  <nav id="nav">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="tickets">All tickets</button>
+    <button data-tab="game" id="nav-game" style="display:none">Game</button>
+    <button data-tab="winners">Winners</button>
+    <button data-tab="retailers">Retailers</button>
+    <button data-tab="maps">Maps</button>
+    <button data-tab="insights">Insights</button>
+  </nav>
+</header>
+<main id="main"></main>
+<footer>
+  <p class="disc">Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida. An independent hobby project.</p>
+  <p>Data: the Florida Lottery's public game API + public Top-Prize Winner reports (see <code>last queried</code> per game). Prizes and odds change constantly — verify with the Florida Lottery before purchasing. Expected-value figures use advertised face values; most jackpot winners take the ~63% cash option. Every scratch-off is negative expected value and every ticket is independent — nothing here changes your odds. Play responsibly · 1-888-ADMIT-IT. · <a href="about.html">About &amp; methodology</a></p>
+</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

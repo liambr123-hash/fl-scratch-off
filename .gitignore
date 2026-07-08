@@ -1,0 +1,5 @@
+pipeline/.cache/
+lottery.db
+__pycache__/
+*.pyc
+.DS_Store

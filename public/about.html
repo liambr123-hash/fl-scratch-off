@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>About · Florida Scratch-Off Statistician</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 58'><ellipse cx='22' cy='33' rx='11.5' ry='8' fill='%23FF6F91'/><path d='M24 27 C 20 18, 30 14, 25.5 8' fill='none' stroke='%23FF6F91' stroke-width='5.4' stroke-linecap='round'/><circle cx='25.5' cy='8' r='3.6' fill='%23FF6F91'/></svg>">
+<style>
+  .prose{max-width:760px;margin:0 auto}
+  .prose p{margin:0 0 14px;color:var(--text)}
+  .prose h2{font-family:var(--serif);font-size:19px;margin:26px 0 10px}
+  .prose ul{margin:0 0 14px 20px;color:var(--text)} .prose li{margin:5px 0}
+  .prose code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:13px}
+  .lead{font-size:16px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="44" height="58" viewBox="0 0 44 58" aria-hidden="true">
+      <g stroke="#FF6F91" stroke-width="2.6" stroke-linecap="round" fill="none">
+        <path d="M20 34 L20 53"/><path d="M25 34 L29 47 L26 53"/></g>
+      <ellipse cx="22" cy="33" rx="11.5" ry="8" fill="#FF6F91"/>
+      <path d="M24 27 C 20 18, 30 14, 25.5 8" fill="none" stroke="#FF6F91" stroke-width="5.4" stroke-linecap="round"/>
+      <circle cx="25.5" cy="8" r="3.6" fill="#FF6F91"/>
+      <path d="M23 8.5 L16 11.5" stroke="#E24B5B" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <div><h1>About &amp; Methodology</h1><span class="sub"><a href="index.html">← back to the data</a></span></div>
+  </div>
+  <div class="sunset"></div>
+</header>
+<main>
+<div class="prose">
+  <p class="lead">An independent, non-commercial hobby project that turns Florida's public scratch-off data into something you can actually read — odds, remaining prizes, expected value, winners, and retailers.</p>
+
+  <h2>Where the numbers come from</h2>
+  <ul>
+    <li><b>Games, odds &amp; prizes remaining</b> — the Florida Lottery's own public game data feed, refreshed nightly. Every prize tier's odds, total, remaining, and paid counts are theirs, unmodified.</li>
+    <li><b>Winners</b> — the Florida Lottery's public "Top-Prize Winners with Retailer Information" reports, parsed automatically. Recent winners of $250,000+ may show as <em>anonymous</em> for 90 days under Florida Statute 24.1051, then their names appear.</li>
+    <li><b>Retailers</b> — the Florida Lottery's public store locator, sampled statewide (13,500+ locations).</li>
+    <li><b>Home/store locations</b> — mapped to city/ZIP centroids (GeoNames); county populations are U.S. Census estimates.</li>
+  </ul>
+
+  <h2>How the analysis works</h2>
+  <ul>
+    <li><b>Expected value (EV/$)</b> is the average payout per $1 for a random <em>remaining</em> ticket. Every game is negative-EV; the best sit around $0.80–0.92. Figures use advertised <em>face</em> values — most jackpot winners take the ~63% cash option, so real returns run lower.</li>
+    <li><b>Estimated tickets</b> are inferred from each tier's <code>odds × prize count</code> (robust to missing tiers). Games with decommissioned/degenerate odds tables are shown without EV.</li>
+    <li><b>Retailer "lift"</b> is winners ÷ that chain's actual store count, versus the statewide average. It's a sales-volume proxy, <em>not</em> luck — every ticket is independent and random. No store or town is "due."</li>
+  </ul>
+
+  <h2>The honest disclaimers</h2>
+  <p><b>Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida.</b> This is a fan-made statistics project. All game names and figures are referenced factually from public records.</p>
+  <p>Odds and prize counts change constantly — always verify on the official Florida Lottery site or app before buying. Nothing here improves your odds; scratch-offs are a form of entertainment with a built-in house edge, and every ticket's outcome is independent.</p>
+  <p><b>Play responsibly.</b> If gambling is causing harm, call the Florida Council on Compulsive Gambling: <b>1-888-ADMIT-IT</b> (1-888-236-4848). Must be 18+ to play.</p>
+
+  <h2>Open by design</h2>
+  <p>The site is fully static and rebuilds itself from the public data every night. The code and data pipeline are open — no tracking, no ads, no accounts.</p>
+</div>
+</main>
+<footer>
+  <p class="disc">Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida. Play responsibly · 1-888-ADMIT-IT.</p>
+</footer>
+</body>
+</html>
