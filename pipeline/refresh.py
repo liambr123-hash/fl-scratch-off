@@ -145,6 +145,15 @@ def fetch_pdfs(ids):
             if r: ok.append(r)
     return ok
 
+def fetch_deadlines():
+    print("· fetching ending/expiring games…")
+    out={"ending":[],"expiring":[]}
+    try: out["ending"]=getj(f"{GW}/scratchgamesapp/getEndingGames")
+    except Exception as e: print("   ending failed:",e)
+    try: out["expiring"]=getj(f"{GW}/expringTicketsApp/getExpiringTickets")
+    except Exception as e: print("   expiring failed:",e)
+    return out
+
 def fetch_retailers():
     print("· fetching retailer census (locator)…")
     centers=[(30.42,-87.22),(30.44,-84.28),(29.65,-82.33),(28.54,-81.38),(27.34,-80.37),
@@ -202,7 +211,7 @@ def build_db(games_api,parses,census,geo):
     c.executescript("""
     CREATE TABLE games(game_no TEXT PRIMARY KEY,game_name TEXT,ticket_price REAL,top_prize_display TEXT,top_prize_value_num REAL,
       overall_odds TEXT,overall_odds_1_in REAL,top_prizes_total INTEGER,top_prizes_claimed INTEGER,top_prizes_remaining INTEGER,
-      launch_date TEXT,end_date TEXT,on_sale INTEGER,last_queried TEXT,data_quality TEXT);
+      launch_date TEXT,end_date TEXT,redemption_date TEXT,on_sale INTEGER,last_queried TEXT,data_quality TEXT);
     CREATE TABLE prize_tiers(id INTEGER PRIMARY KEY AUTOINCREMENT,game_no TEXT,tier_rank INTEGER,prize_amount_display TEXT,
       prize_amount_value REAL,odds_1_in REAL,remaining INTEGER,original INTEGER,claimed INTEGER);
     CREATE TABLE top_prize_winners(id INTEGER PRIMARY KEY AUTOINCREMENT,game_no TEXT,prize_level_num REAL,is_headline INTEGER,
@@ -234,9 +243,9 @@ def build_db(games_api,parses,census,geo):
         tp_rem=(tp_total-tp_claim) if (tp_total is not None and tp_claim is not None) else (tiers[0].get("PrizesRemaining") if tiers else None)
         top_disp=tiers[0]["PrizeAmount"] if tiers else None
         top_val=money(top_disp)
-        c.execute("INSERT INTO games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        c.execute("INSERT INTO games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (gid,name,price,top_disp,top_val,f"1:{g.get('OverallOdds')}",g.get("OverallOdds"),
-             tp_total,tp_claim,tp_rem,(g.get("LaunchDate") or "")[:10],end,on,p.get("last_queried"),None))
+             tp_total,tp_claim,tp_rem,(g.get("LaunchDate") or "")[:10],end,(g.get("RedemptionDate") or "")[:10],on,p.get("last_queried"),None))
         for rank,t in enumerate(tiers):
             v=money(t["PrizeAmount"]); tot=t.get("TotalPrizes"); rem=t.get("PrizesRemaining"); paid=t.get("PrizesPaid")
             c.execute("INSERT INTO prize_tiers(game_no,tier_rank,prize_amount_display,prize_amount_value,odds_1_in,remaining,original,claimed) VALUES(?,?,?,?,?,?,?,?)",
@@ -302,7 +311,7 @@ def build_db(games_api,parses,census,geo):
 # ---------------- emit data.js ----------------
 POP={"Alachua":290028,"Baker":29737,"Bay":204479,"Bradford":28307,"Brevard":663982,"Broward":2013317,"Calhoun":13289,"Charlotte":217212,"Citrus":171666,"Clay":239593,"Collier":417131,"Columbia":74094,"DeSoto":37078,"Dixie":18038,"Duval":1062963,"Escambia":333834,"Flagler":140360,"Franklin":13029,"Gadsden":44298,"Gilchrist":20488,"Glades":13270,"Gulf":15943,"Hamilton":14180,"Hardee":25932,"Hendry":48276,"Hernando":221701,"Highlands":111122,"Hillsborough":1574115,"Holmes":20119,"Indian River":172799,"Jackson":49629,"Jefferson":16007,"Lafayette":8792,"Lake":456068,"Lee":875607,"Leon":299048,"Levy":48520,"Liberty":8035,"Madison":18759,"Manatee":468200,"Marion":442660,"Martin":166272,"Miami-Dade":2802029,"Monroe":80406,"Nassau":106879,"Okaloosa":221810,"Okeechobee":42608,"Orange":1528002,"Osceola":481718,"Palm Beach":1575726,"Pasco":674516,"Pinellas":948563,"Polk":874790,"Putnam":77734,"St. Johns":346328,"St. Lucie":402449,"Santa Rosa":211115,"Sarasota":479958,"Seminole":491884,"Sumter":157772,"Suwannee":48149,"Taylor":21210,"Union":16250,"Volusia":606573,"Wakulla":38089,"Walton":93288,"Washington":26695}
 def tier5(v): return 1 if v is None else 5 if v>=25e6 else 4 if v>=5e6 else 3 if v>=2e6 else 2 if v>=1e6 else 1
-def emit(con,zipmap,ccent,z2c,fl_geo):
+def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     con.row_factory=sqlite3.Row; D={}
     D["games"]=[{k:r[k] for k in r.keys()} for r in con.execute("""SELECT g.*,a.est_tickets_printed,a.est_tickets_remaining,
       a.pct_tickets_remaining,a.value_original,a.value_remaining,a.pct_value_remaining,a.ev_per_ticket_now,
@@ -370,11 +379,27 @@ def emit(con,zipmap,ccent,z2c,fl_geo):
     types=[{"name":t,"stores":tc[t],"winners":wtc.get(t,0),"per1k":round(1000*wtc.get(t,0)/tc[t],1),"lift":round((1000*wtc.get(t,0)/tc[t])/base,2)} for t in tc if tc[t]>50]
     types.sort(key=lambda x:-x["lift"])
     D["retail"]={"total":total,"itvm":itvm,"base_per1k":round(base,1),"winners_matched":len(wr),"chains":chains,"types":types}
+    D["deadlines"]={"ending":[{"id":str(e.get("Id")),"name":e.get("GameName"),"price":e.get("TicketPrice"),
+        "last_sell":(e.get("LastDayToSell") or "")[:10],"last_redeem":(e.get("LastDayToRedeem") or "")[:10]}
+        for e in (deadlines.get("ending") or [])],
+      "expiring":deadlines.get("expiring") or []}
     D["fl"]=fl_geo
     on=[g for g in D["games"] if g["on_sale"]]
     D["meta"]={"built":time.strftime("%Y-%m-%d"),"n_games":len(D["games"]),"n_winners":len(D["winners"]),
       "on_sale":len(on),"tp_left":sum(g["top_prizes_remaining"] or 0 for g in on),
       "value_left":sum(g["value_remaining"] or 0 for g in on)}
+    # append nightly history snapshot (compact; grows ~2KB/day)
+    hpath=os.path.join(PUB,"history.json")
+    try: hist=json.load(open(hpath))
+    except Exception: hist={"days":[]}
+    today=time.strftime("%Y-%m-%d")
+    if not any(d["d"]==today for d in hist["days"]):
+        snap={"d":today,"g":{}}
+        for g in D["games"]:
+            if g["on_sale"]:
+                snap["g"][g["game_no"]]=[g["top_prizes_remaining"],g["pct_value_remaining"],g["value_per_dollar_now"]]
+        hist["days"].append(snap)
+        json.dump(hist,open(hpath,"w"),separators=(",",":"))
     with open(os.path.join(PUB,"data.js"),"w") as f:
         f.write("const DATA="); json.dump(D,f,separators=(",",":")); f.write(";")
     return D["meta"]
@@ -388,10 +413,11 @@ def main():
     for gid in ok:
         try: parses[gid]=parse_pdf(os.path.join(CACHE,"pdf",f"{gid}.pdf"))
         except Exception as e: print("   parse fail",gid,e)
+    deadlines=fetch_deadlines()
     census=fetch_retailers()
     zipmap,ccent,z2c=load_geonames()
     con,zipmap,ccent=build_db(games,parses,census,(zipmap,ccent,z2c))
-    meta=emit(con,zipmap,ccent,z2c,fl_geo)
+    meta=emit(con,zipmap,ccent,z2c,fl_geo,deadlines)
     print("✓ refresh complete:",json.dumps(meta))
 
 if __name__=="__main__": main()

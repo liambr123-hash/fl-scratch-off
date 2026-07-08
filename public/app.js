@@ -5,6 +5,51 @@ const G=DATA.games, T=DATA.tiers, W=DATA.winners, M=DATA.meta;
 const byNo=Object.fromEntries(G.map(g=>[g.game_no,g]));
 const GAME_NAME=Object.fromEntries(G.map(g=>[g.game_no,g.game_name]));
 
+/* ---------- computed metrics (documented in about.html) ---------- */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+for(const g of G){
+  const tiers=T[g.game_no]||[];
+  // profit odds: chance a ticket pays MORE than it costs (design)
+  let pProfit=0,pAnyD=0;
+  for(const t of tiers){ if(t[2]>0){ pAnyD+=1/t[2]; if(t[1]>g.ticket_price) pProfit+=1/t[2]; } }
+  g.profit_odds=pProfit>0?1/pProfit:null;          // 1-in-X to turn a profit
+  g.p_any=g.overall_odds_1_in?1/g.overall_odds_1_in:pAnyD||null;
+  g.mil_left=tiers.filter(t=>t[1]>=1e6).reduce((s,t)=>s+(t[3]||0),0);   // $1M+ prizes remaining (all tiers)
+  g.dead=!!(g.on_sale&&(g.top_prizes_remaining===0));
+  g.drift=(g.value_per_dollar_now!=null&&g.value_per_dollar_original!=null)?g.value_per_dollar_now-g.value_per_dollar_original:null;
+  // Value Score 0-100 (open formula): 45% current EV, 20% profit-odds, 20% freshness, 15% jackpot health
+  if(g.value_per_dollar_now!=null&&g.on_sale){
+    const evN=clamp((g.value_per_dollar_now-0.55)/(0.95-0.55),0,1);
+    const prN=clamp(((pProfit||0)-0.03)/(0.15-0.03),0,1);
+    const frN=clamp((g.pct_value_remaining||0)/100,0,1);
+    const jH=g.dead?0:(g.top_prizes_total?clamp(g.top_prizes_remaining/g.top_prizes_total,0,1)*0.5+0.5:0.5);
+    g.score=Math.round(100*(0.45*evN+0.20*prN+0.20*frN+0.15*jH));
+    if(g.dead)g.score=Math.min(g.score,34);
+  } else g.score=null;
+  // straight-line projections
+  const days=(Date.now()-new Date(g.launch_date||"2024-01-01"))/864e5;
+  if(g.on_sale&&g.est_tickets_printed&&g.est_tickets_remaining&&days>14){
+    const rate=(g.est_tickets_printed-g.est_tickets_remaining)/days;   // tickets/day
+    g.sellout_days=rate>50?Math.round(g.est_tickets_remaining/rate):null;
+  } else g.sellout_days=null;
+}
+const band=s=>s==null?null:s>=70?["Excellent","good"]:s>=55?["Good","teal2"]:s>=40?["Fair","warn"]:["Avoid","bad"];
+function scoreBadge(g){
+  if(g.score==null)return "—";
+  const b=band(g.score);
+  return `<span class="scoreb ${b[1]}">${g.score}</span>`;
+}
+function deadBadge(g){return g.dead?' <span class="deadb">dead money</span>':"";}
+// cash haircut per game (avg real payout / advertised) from winners with both numbers
+const CASH={};
+{const acc={};
+ for(const w of W){
+   const adv=w[6], pay=w[8]?parseFloat(String(w[8]).replace(/[^\d.]/g,"")):null;
+   if(adv>=1e6&&pay&&pay>1000&&w[7]&&/CASH/i.test(w[7])){ (acc[w[0]]=acc[w[0]]||[]).push(pay/adv); }
+ }
+ for(const k in acc) CASH[k]=acc[k].reduce((a,b)=>a+b,0)/acc[k].length;}
+
+
 /* ---------- formatting ---------- */
 const money=v=>v==null?"—":(v>=1e6?"$"+(v/1e6).toLocaleString(undefined,{maximumFractionDigits:1})+"M":v>=1e3?"$"+(v/1e3).toLocaleString(undefined,{maximumFractionDigits:0})+"k":"$"+Math.round(v).toLocaleString());
 const moneyFull=v=>v==null?"—":"$"+Math.round(v).toLocaleString();
@@ -17,7 +62,7 @@ const anon=n=>/EXEMPT/.test(n||"");
 
 /* ---------- charts registry ---------- */
 let charts=[];
-function newChart(el,cfg){const c=new Chart(el,cfg);charts.push(c);return c;}
+function newChart(el,cfg){if(!el)return null;const c=new Chart(el,cfg);charts.push(c);return c;}
 function clearCharts(){charts.forEach(c=>c.destroy());charts=[];}
 const gridC="rgba(128,128,128,.15)", tickC=getComputedStyle(document.body).color;
 Chart.defaults.color=tickC; Chart.defaults.borderColor=gridC;
@@ -28,7 +73,7 @@ const mainEl=$("#main");
 function go(tab,arg){location.hash=arg?tab+"/"+arg:tab;}
 function route(){
   const [tab,arg]=(location.hash.replace(/^#/,"")||"overview").split("/");
-  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  document.querySelectorAll("nav button").forEach(b=>{b.classList.toggle("active",b.dataset.tab===tab);if(b.dataset.tab===tab)b.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"});});
   $("#nav-game").style.display=(tab==="game")?"":"none";
   clearCharts();
   ({overview,tickets,game,winners,retailers,maps,insights}[tab]||overview)(arg);
@@ -71,10 +116,10 @@ function makeTable(cols,rows,opts={}){
       if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1;
       return (typeof x==="string"?x.localeCompare(y):x-y)*dir;
     });
-    let h='<table><thead><tr>'+cols.map(c=>`<th class="${c.r?"r":""}" data-k="${c.k}">${c.label}${c.k===sortK?` <span class="arr">${dir<0?"▼":"▲"}</span>`:""}</th>`).join("")+'</tr></thead><tbody>';
+    let h='<table><thead><tr>'+cols.map(c=>`<th class="${c.r?"r":""} ${c.hideM?"hide-m":""}" data-k="${c.k}">${c.label}${c.k===sortK?` <span class="arr">${dir<0?"▼":"▲"}</span>`:""}</th>`).join("")+'</tr></thead><tbody>';
     for(const row of sorted){
       h+=`<tr${opts.rowClick?` class="click" data-id="${esc(opts.rowClick(row))}"`:""}>`+
-        cols.map(c=>`<td class="${c.r?"r":""}">${c.fmt?c.fmt(row):esc(row[c.k]??"—")}</td>`).join("")+"</tr>";
+        cols.map(c=>`<td class="${c.r?"r":""} ${c.hideM?"hide-m":""}">${c.fmt?c.fmt(row):esc(row[c.k]??"—")}</td>`).join("")+"</tr>";
     }
     wrap.innerHTML=h+"</tbody></table>";
     wrap.querySelectorAll("th").forEach(th=>th.onclick=()=>{
@@ -105,14 +150,16 @@ function leftBar(g){
 function salePill(g){return g.on_sale?'<span class="pill on">on sale</span>':'<span class="pill off">ended</span>';}
 
 const TICKET_COLS=[
-  {k:"game_no",label:"#"},
-  {k:"game_name",label:"Game"},
+  {k:"game_no",label:"#",hideM:1},
+  {k:"game_name",label:"Game",fmt:g=>esc(g.game_name)+deadBadge(g)},
+  {k:"score",label:"Score",r:1,fmt:scoreBadge},
   {k:"ticket_price",label:"Price",r:1,fmt:g=>"$"+Math.round(g.ticket_price)},
   {k:"top_prize_value_num",label:"Top prize",r:1,fmt:g=>esc(g.top_prize_display||money(g.top_prize_value_num))},
-  {k:"top_prizes_remaining",label:"TP left",r:1,fmt:g=>`${g.top_prizes_remaining??"—"}<span class="dim">/${g.top_prizes_total??"—"}</span>`},
-  {k:"overall_odds_1_in",label:"Odds",r:1,fmt:g=>g.overall_odds_1_in?("1:"+g.overall_odds_1_in):"—"},
+  {k:"top_prizes_remaining",label:"TP left",r:1,hideM:1,fmt:g=>`${g.top_prizes_remaining??"—"}<span class="dim">/${g.top_prizes_total??"—"}</span>`},
+  {k:"overall_odds_1_in",label:"Odds",r:1,hideM:1,fmt:g=>g.overall_odds_1_in?("1:"+g.overall_odds_1_in):"—"},
+  {k:"profit_odds",label:"Profit odds",r:1,hideM:1,fmt:g=>g.profit_odds?("1 in "+g.profit_odds.toFixed(1)):"—"},
   {k:"value_per_dollar_now",label:"EV/$ now",r:1,fmt:evCell},
-  {k:"value_per_dollar_original",label:"EV/$ design",r:1,fmt:g=>f2(g.value_per_dollar_original)},
+  {k:"value_per_dollar_original",label:"EV/$ design",r:1,hideM:1,fmt:g=>f2(g.value_per_dollar_original)},
   {k:"pct_value_remaining",label:"Value left",fmt:leftBar},
   {k:"on_sale",label:"Status",fmt:salePill},
 ];
@@ -123,19 +170,113 @@ function overview(){
   const tpLeft=on.filter(g=>(g.top_prize_value_num||0)>=1e4).reduce((s,g)=>s+(g.top_prizes_remaining||0),0);
   const valLeft=on.reduce((s,g)=>s+(g.value_remaining||0),0);
   const big=G.filter(g=>g.on_sale&&g.top_prizes_remaining>0&&g.top_prize_value_num>=1e6);
+  const bigN=big.reduce((s,g)=>s+g.top_prizes_remaining,0);
+  const bestv=[...on].filter(g=>g.value_per_dollar_now!=null).sort((a,b)=>b.value_per_dollar_now-a.value_per_dollar_now);
+  const jackv=[...on].filter(g=>g.top_prizes_remaining>0&&g.top_prize_value_num>=1e6).sort((a,b)=>b.top_prize_value_num-a.top_prize_value_num||b.top_prizes_remaining-a.top_prizes_remaining);
+  const freshv=[...on].filter(g=>g.pct_value_remaining!=null).sort((a,b)=>b.pct_value_remaining-a.pct_value_remaining);
+  const tix=(g,rank,mode)=>{
+    let bigv,sm,meta;
+    if(mode==="ev"){bigv=f2(g.value_per_dollar_now);sm="EV / $1";meta=`$${Math.round(g.ticket_price)} ticket · ${pct(g.pct_value_remaining)} value left`;}
+    else if(mode==="jack"){bigv=money(g.top_prize_value_num);sm=g.top_prizes_remaining+" of "+(g.top_prizes_total||"?")+" left";meta=`$${Math.round(g.ticket_price)} ticket · game #${g.game_no}`;}
+    else{bigv=pct(g.pct_value_remaining);sm="value left";meta=`$${Math.round(g.ticket_price)} ticket · EV ${f2(g.value_per_dollar_now)}/$`;}
+    return `<div class="tix" data-g="${g.game_no}">
+      <div class="rank">${rank}</div>
+      <div class="body"><div class="nm">${esc(g.game_name)}</div><div class="meta">${meta}</div></div>
+      <div class="big ${mode==="ev"?"good":mode==="jack"?"flamc":""}">${bigv}<small>${sm}</small></div></div>`;
+  };
+  const posEV=on.filter(g=>g.value_per_dollar_now>1);
+  const deadG=on.filter(g=>g.dead).sort((a,b)=>b.ticket_price-a.ticket_price);
+  const dl=(DATA.deadlines&&DATA.deadlines.ending)||[];
+  const today=new Date(M.built);
+  const recent=[...W].filter(w=>w[1]).sort((a,b)=>b[1].localeCompare(a[1])).slice(0,10);
+  const tickItems=[
+    ...recent.slice(0,6).map(w=>`<span class="ti" data-g="${w[0]}">${money(w[6])} claimed · ${esc(w[3]||"FL")} · ${esc(GAME_NAME[w[0]]||"")}</span>`),
+    `<span class="ti">${G.filter(g=>g.on_sale&&g.top_prize_value_num>=25e6&&g.top_prizes_remaining>0).reduce((s,g)=>s+g.top_prizes_remaining,0)} × $25M jackpots still unclaimed</span>`,
+    ...(posEV.length?[`<span class="ti" data-g="${posEV[0].game_no}">⚡ ${esc(posEV[0].game_name)} is positive-EV (${f2(posEV[0].value_per_dollar_now)}/$)</span>`]:[])
+  ].join('<span class="tsep">◆</span>');
   mainEl.innerHTML=`
-  <div class="cards">
-    <div class="card"><div class="lab">Games on sale</div><div class="val">${on.length}</div><div class="note">${G.length-on.length} ended</div></div>
-    <div class="card"><div class="lab">Top prizes unclaimed</div><div class="val">${tpLeft}</div><div class="note">on-sale, $10k+ jackpots</div></div>
-    <div class="card"><div class="lab">Prize money remaining</div><div class="val">${money(valLeft)}</div><div class="note">all tiers, on-sale</div></div>
-    <div class="card"><div class="lab">$1M+ jackpots live</div><div class="val">${big.reduce((s,g)=>s+g.top_prizes_remaining,0)}</div><div class="note">across ${big.length} games</div></div>
-    <div class="card"><div class="lab">Winners recorded</div><div class="val">${M.n_winners}</div><div class="note">all-time, these games</div></div>
+  <div class="ticker" aria-label="recent claims ticker"><div class="tk">${tickItems}<span class="tsep">◆</span>${tickItems}</div></div>
+  ${posEV.length?`<div class="alertbar" data-g="${posEV[0].game_no}"><b>⚡ Statistical anomaly:</b>&nbsp;${esc(posEV[0].game_name)} ($${Math.round(posEV[0].ticket_price)}) is currently Florida's only <b>positive-EV</b> scratch-off — ${f2(posEV[0].value_per_dollar_now)} back per $1. Caveat: ${pct(posEV[0].pct_value_remaining)} of value left, selling fast.</div>`:""}
+  <div class="ministrip">
+    <div class="mini"><b>${on.length}</b><span>games<br>on sale</span></div>
+    <div class="mini"><b>${money(valLeft)}</b><span>prize money<br>remaining</span></div>
+    <div class="mini"><b>${bigN}</b><span>$1M+ jackpots<br>live in ${big.length} games</span></div>
+    <div class="mini"><b>${tpLeft}</b><span>top prizes left<br>($10k+ games)</span></div>
+    <div class="mini warnb" id="mini-dead"><b class="bad">${deadG.length}</b><span>dead-money games<br>still on sale ↓</span></div>
   </div>
-  <div class="panel"><h2>Best value right now <span class="hint">on-sale games ranked by expected payout per $1 of a remaining ticket</span></h2><div id="best"></div></div>
+  <div class="podium">
+    <div class="pod"><h3><span class="dot" style="background:var(--teal)"></span>Best value right now</h3>
+      <div class="sub">expected payout per $1 of a remaining ticket</div>
+      ${bestv.slice(0,3).map((g,i)=>tix(g,i+1,"ev")).join("")}
+      <span class="more" data-go="best">full ranking ↓</span></div>
+    <div class="pod"><h3><span class="dot" style="background:var(--flamingo)"></span>Biggest jackpots live</h3>
+      <div class="sub">advertised top prizes still unclaimed</div>
+      ${jackv.slice(0,3).map((g,i)=>tix(g,i+1,"jack")).join("")}
+      <span class="more" data-go="jack">all jackpots ↓</span></div>
+    <div class="pod"><h3><span class="dot" style="background:var(--tangerine)"></span>Freshest games</h3>
+      <div class="sub">most prize value still on the shelf</div>
+      ${freshv.slice(0,3).map((g,i)=>tix(g,i+1,"fresh")).join("")}
+      <span class="more" data-go="fresh">all fresh games ↓</span></div>
+  </div>
+  ${dl.length?`<div class="panel lastchance"><h2>⏳ Last chance <span class="hint">tickets from ended games become worthless after the redemption deadline</span></h2>
+    <div class="dlgrid">${dl.map(d=>{
+      const days=Math.ceil((new Date(d.last_redeem)-today)/864e5);
+      const cls=days<=21?"crit":days<=45?"low":"";
+      return `<div class="dlcard ${cls}"><div class="nm">${esc(d.name)} <span class="dim">$${d.price}</span></div>
+        <div class="meta">stopped selling ${d.last_sell}</div>
+        <div class="cd">${days>0?days+" days to redeem":"EXPIRED"}</div>
+        <div class="meta">deadline ${d.last_redeem}</div></div>`}).join("")}</div></div>`:""}
+  <div class="panel" id="sec-avoid"><h2>🚫 Dead money — avoid <span class="hint">on sale, but the advertised top prize is already gone</span></h2><div id="avoidT"></div></div>
+  <div class="panel" id="sec-wiz"><h2>🎯 Pick a ticket for me</h2>
+    <div class="controls">
+      <div class="seg" id="wbudget"><button data-v="0" class="active">Any $</button><button data-v="1">$1–2</button><button data-v="5">$3–5</button><button data-v="10">$10</button><button data-v="20">$20–50</button></div>
+      <div class="seg" id="wgoal"><button data-v="value" class="active">Best value</button><button data-v="dream">Dream big</button><button data-v="often">Win something</button></div>
+    </div>
+    <div class="podium" id="wizout"></div>
+    <p class="mut" style="font-size:12px">Every scratch-off is negative expected value (best ≈ $0.80–0.92 back per $1). "Best" here means least-bad by the open <a href="about.html">Value Score formula</a> — no ticket is a good investment.</p>
+  </div>
+  <div class="panel" id="sec-best"><h2>Best value — full ranking <span class="hint">on-sale games by expected payout per $1</span></h2><div id="best"></div></div>
   <div class="grid2">
-    <div class="panel"><h2>Biggest jackpots still out there</h2><div id="jack"></div></div>
-    <div class="panel"><h2>Freshest games <span class="hint">most prize value left</span></h2><div id="fresh"></div></div>
+    <div class="panel" id="sec-jack"><h2>Biggest jackpots still out there</h2><div id="jack"></div></div>
+    <div class="panel" id="sec-fresh"><h2>Freshest games <span class="hint">most prize value left</span></h2><div id="fresh"></div></div>
   </div>`;
+  mainEl.querySelectorAll(".tix").forEach(t=>t.onclick=()=>go("game",t.dataset.g));
+  mainEl.querySelectorAll(".more").forEach(m=>m.onclick=()=>{
+    const id={best:"sec-best",jack:"sec-jack",fresh:"sec-fresh"}[m.dataset.go];
+    document.getElementById(id)?.scrollIntoView({behavior:"smooth",block:"start"});});
+  mainEl.querySelectorAll(".ti[data-g],.alertbar[data-g]").forEach(t=>t.onclick=()=>go("game",t.dataset.g));
+  const md=document.getElementById("mini-dead");
+  if(md)md.onclick=()=>document.getElementById("sec-avoid")?.scrollIntoView({behavior:"smooth"});
+  $("#avoidT").append(makeTable([
+    {k:"game_name",label:"Game",fmt:g=>esc(g.game_name)+deadBadge(g)},
+    {k:"ticket_price",label:"Price",r:1,fmt:g=>"$"+Math.round(g.ticket_price)},
+    {k:"top_prize_value_num",label:"Advertised top",r:1,hideM:1,fmt:g=>esc(g.top_prize_display||money(g.top_prize_value_num))},
+    {k:"pct_value_remaining",label:"Value left",fmt:leftBar},
+    {k:"end_date",label:"On sale until",r:1,hideM:1},
+  ],deadG,{sort:"ticket_price",rowClick:g=>g.game_no}));
+  const wiz={b:"0",g:"value"};
+  function runWiz(){
+    let pool=on.filter(g=>g.score!=null&&!g.dead);
+    if(wiz.b==="1")pool=pool.filter(g=>g.ticket_price<=2);
+    else if(wiz.b==="5")pool=pool.filter(g=>g.ticket_price>=3&&g.ticket_price<=5);
+    else if(wiz.b==="10")pool=pool.filter(g=>g.ticket_price===10);
+    else if(wiz.b==="20")pool=pool.filter(g=>g.ticket_price>=20);
+    if(wiz.g==="dream")pool=[...pool].filter(g=>g.top_prizes_remaining>0).sort((a,b)=>b.top_prize_value_num-a.top_prize_value_num||b.score-a.score);
+    else if(wiz.g==="often")pool=[...pool].filter(g=>g.profit_odds).sort((a,b)=>a.profit_odds-b.profit_odds);
+    else pool=[...pool].sort((a,b)=>b.score-a.score);
+    const why=g=>wiz.g==="dream"?`${esc(g.top_prize_display||money(g.top_prize_value_num))} top prize · ${g.top_prizes_remaining} left`
+      :wiz.g==="often"?`1 in ${g.profit_odds.toFixed(1)} tickets turns a profit`
+      :`${f2(g.value_per_dollar_now)} back per $1 · ${pct(g.pct_value_remaining)} value left`;
+    document.getElementById("wizout").innerHTML=pool.slice(0,3).map((g,i)=>`
+      <div class="pod tixpick" data-g="${g.game_no}">
+        <h3><span class="dot" style="background:var(--teal)"></span>${["First","Second","Third"][i]} pick ${scoreBadge(g)}</h3>
+        <div class="nm2">${esc(g.game_name)}</div>
+        <div class="meta">$${Math.round(g.ticket_price)} ticket · ${why(g)}</div></div>`).join("")||'<p class="mut">No games match that filter.</p>';
+    document.querySelectorAll(".tixpick").forEach(t=>t.onclick=()=>go("game",t.dataset.g));
+  }
+  document.querySelectorAll("#wbudget button").forEach(b=>b.onclick=()=>{wiz.b=b.dataset.v;document.querySelectorAll("#wbudget button").forEach(x=>x.classList.toggle("active",x===b));runWiz();});
+  document.querySelectorAll("#wgoal button").forEach(b=>b.onclick=()=>{wiz.g=b.dataset.v;document.querySelectorAll("#wgoal button").forEach(x=>x.classList.toggle("active",x===b));runWiz();});
+  runWiz();
   $("#best").append(makeTable(TICKET_COLS,on.filter(g=>g.value_per_dollar_now!=null),{sort:"value_per_dollar_now",rowClick:g=>g.game_no}));
   const jrows=G.filter(g=>g.top_prizes_remaining>0&&g.top_prize_value_num>=2e6).map(g=>g);
   $("#jack").append(makeTable([
@@ -190,8 +331,9 @@ function game(no){
   const flag=g.data_quality?`<div class="flagnote">⚠ ${esc(g.data_quality)}</div>`:"";
   mainEl.innerHTML=`
   <span class="back" onclick="history.back()">← back</span>
-  <div class="gtitle">${esc(g.game_name)} <span class="dim">#${g.game_no}</span> ${salePill(g)}</div>
-  <div class="gsub">$${Math.round(g.ticket_price)} ticket · top prize ${esc(g.top_prize_display||money(g.top_prize_value_num))} · overall odds 1:${g.overall_odds_1_in??"?"} · launched ${g.launch_date||"?"}${g.on_sale?"":" · ended "+g.end_date} · data ${esc(g.last_queried||"")}</div>
+  <div class="gtitle">${esc(g.game_name)} <span class="dim">#${g.game_no}</span> ${salePill(g)}${deadBadge(g)} ${g.score!=null?scoreBadge(g):""}</div>
+  <div class="gsub">$${Math.round(g.ticket_price)} ticket · top prize ${esc(g.top_prize_display||money(g.top_prize_value_num))}${CASH[no]&&g.top_prize_value_num>=1e6?` <span class="dim">(winners actually take ≈ ${money(g.top_prize_value_num*CASH[no])} cash)</span>`:""} · overall odds 1:${g.overall_odds_1_in??"?"}${g.profit_odds?` · profit odds 1 in ${g.profit_odds.toFixed(1)}`:""} · launched ${g.launch_date||"?"}${g.on_sale?"":" · ended "+g.end_date+(g.redemption_date?" · redeem by "+g.redemption_date:"")} · data ${esc(g.last_queried||"")}</div>
+  ${g.mil_left>0?`<div class="gsub" style="margin-top:-8px">💰 <b class="flamc">${g.mil_left}</b> prizes of $1,000,000+ still unclaimed in this game${g.sellout_days?` · at the current sales pace, est. sold out in ~${g.sellout_days>365?Math.round(g.sellout_days/30)+" months":g.sellout_days+" days"}`:""}</div>`:(g.sellout_days&&g.on_sale?`<div class="gsub" style="margin-top:-8px">est. sold out in ~${g.sellout_days>365?Math.round(g.sellout_days/30)+" months":g.sellout_days+" days"} at current pace</div>`:"")}
   ${flag}
   <div class="cards">
     <div class="card"><div class="lab">EV per $1 now</div><div class="val ${g.value_per_dollar_now>=0.8?"good":""}">${f2(g.value_per_dollar_now)}</div><div class="note">design ${f2(g.value_per_dollar_original)}</div></div>
@@ -225,7 +367,7 @@ function game(no){
       {k:"2",label:"Winner",fmt:w=>anon(w[2])?'<span class="dim">anonymous (90-day exemption)</span>':esc(w[2]),sortVal:w=>w[2]},
       {k:"3",label:"City",fmt:w=>esc(w[3]||"—"),sortVal:w=>w[3]||""},
       {k:"5",label:"Prize",r:1,fmt:w=>esc(w[5]),sortVal:w=>w[6]},
-      {k:"8",label:"Payout",r:1,fmt:w=>esc(w[8]||"—"),sortVal:w=>w[8]||""},
+      {k:"8",label:"Payout",r:1,hideM:1,fmt:w=>esc(w[8]||"—"),sortVal:w=>w[8]||""},
       {k:"10",label:"Sold at",fmt:w=>esc(w[10]||"—"),sortVal:w=>w[10]||""},
     ],gw,{sort:"1"}));
   }
@@ -238,15 +380,15 @@ function winners(){
     <div class="controls">
       <input type="text" id="wq" placeholder="Search name, city, retailer, game…">
       <select id="wmin"><option value="0">Any prize</option><option value="250000">$250k+</option><option value="1000000">$1M+</option><option value="5000000">$5M+</option></select>
-      <label class="mut" style="font-size:13px"><input type="checkbox" id="wanon"> hide anonymous</label>
+      <select id="wanon"><option value="">Named + anonymous</option><option value="named">Named only</option><option value="anon">Anonymous only</option></select>
     </div>
     <div id="wtbl"></div>
   </div>`;
-  let q="",min=0,hideA=false;
+  let q="",min=0,anonF="";
   function refresh(){
     const rows=W.filter(w=>
       (!q||[w[2],w[3],w[10],GAME_NAME[w[0]],w[0]].some(x=>(x||"").toLowerCase().includes(q)))&&
-      ((w[6]||0)>=min)&&(!hideA||!anon(w[2])));
+      ((w[6]||0)>=min)&&(anonF===""||(anonF==="named"?!anon(w[2]):anon(w[2]))));
     $("#wtbl").innerHTML="";
     $("#wtbl").append(makeTable([
       {k:"1",label:"Claimed",fmt:w=>w[1]||"—",sortVal:w=>w[1]||""},
@@ -254,13 +396,13 @@ function winners(){
       {k:"2",label:"Winner",fmt:w=>anon(w[2])?'<span class="dim">anonymous</span>':esc(w[2]),sortVal:w=>w[2]},
       {k:"3",label:"City",fmt:w=>esc(w[3]||"—"),sortVal:w=>w[3]||""},
       {k:"6",label:"Prize",r:1,fmt:w=>esc(w[5]),sortVal:w=>w[6]},
-      {k:"8",label:"Payout",r:1,fmt:w=>esc(w[8]||"—"),sortVal:w=>w[8]||""},
+      {k:"8",label:"Payout",r:1,hideM:1,fmt:w=>esc(w[8]||"—"),sortVal:w=>w[8]||""},
       {k:"10",label:"Sold at",fmt:w=>esc((w[10]||"—")+(w[11]?" — "+w[11]:"")),sortVal:w=>w[10]||""},
     ],rows,{sort:"1"}));
   }
   $("#wq").oninput=e=>{q=e.target.value.toLowerCase();refresh();};
   $("#wmin").onchange=e=>{min=+e.target.value;refresh();};
-  $("#wanon").onchange=e=>{hideA=e.target.checked;refresh();};
+  $("#wanon").onchange=e=>{anonF=e.target.value;refresh();};
   refresh();
 }
 
@@ -379,6 +521,11 @@ function insights(){
     <div class="panel"><h2>Design payout by price tier</h2><div class="chartbox"><canvas id="payp"></canvas></div></div>
   </div>
   <div class="grid2">
+    <div class="panel"><h2>The buy zone <span class="hint">value now vs freshness — top-right is where you want to shop</span></h2><div class="chartbox"><canvas id="quad"></canvas></div></div>
+    <div class="panel"><h2>EV drift <span class="hint">how each game's value moved since it was designed</span></h2><div class="chartbox"><canvas id="drift"></canvas></div></div>
+  </div>
+  <div class="grid2">
+    <div class="panel"><h2>The anonymity era <span class="hint">share of winners hidden by F.S. 24.1051 (90-day shield, from Apr 2026)</span></h2><div class="chartbox"><canvas id="anonC"></canvas></div></div>
     <div class="panel"><h2>Top-prize claims over time</h2><div class="chartbox"><canvas id="tline"></canvas></div></div>
     <div class="panel"><h2>Where the prize money sits <span class="hint">remaining value by tier size, all on-sale games</span></h2><div class="chartbox"><canvas id="split"></canvas></div></div>
   </div>`;
@@ -400,6 +547,35 @@ function insights(){
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+"% designed payout"}}},
       scales:{y:{min:50,max:85,ticks:{callback:v=>v+"%"}}}}});
+  // buy-zone quadrant
+  newChart($("#quad"),{type:"scatter",data:{datasets:[{
+      data:on.filter(g=>g.pct_value_remaining!=null).map(g=>({x:g.pct_value_remaining,y:g.value_per_dollar_now,g})),
+      pointRadius:on.map(g=>3+Math.sqrt(g.ticket_price||1)*1.4),pointHoverRadius:9,
+      pointBackgroundColor:on.map(g=>g.value_per_dollar_now>=0.78&&g.pct_value_remaining>=40?"#2FB6A8":g.dead?"#E24B5B":"#7d8f87")}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw.g.game_name}: ${f2(c.raw.y)}/$ · ${pct(c.raw.x)} left · $${Math.round(c.raw.g.ticket_price)}`}}},
+      scales:{x:{title:{display:true,text:"% of prize value remaining"},min:0,max:100},
+              y:{title:{display:true,text:"EV per $1 now"}}},
+      onClick:(e,els,ch)=>{if(els.length)go("game",ch.data.datasets[0].data[els[0].index].g.game_no);}}});
+  // EV drift diverging bars
+  const dr=[...on].filter(g=>g.drift!=null).sort((a,b)=>b.drift-a.drift);
+  const drTop=[...dr.slice(0,7),...dr.slice(-7)];
+  newChart($("#drift"),{type:"bar",data:{labels:drTop.map(g=>g.game_name.slice(0,22)),
+      datasets:[{data:drTop.map(g=>+(g.drift).toFixed(3)),
+        backgroundColor:drTop.map(g=>g.drift>=0?"#2FB6A8":"#E24B5B")}]},
+    options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.raw>=0?"+":""}${c.raw} EV/$ vs design`}}},
+      scales:{x:{title:{display:true,text:"EV per $1: now − design"}},y:{ticks:{font:{size:10.5}}}},
+      onClick:(e,els)=>{if(els.length)go("game",drTop[els[0].index].game_no);}}});
+  // anonymity era
+  const am={};
+  for(const w of W){ if(w[1]&&w[1]>="2025-07"){const m=w[1].slice(0,7);(am[m]=am[m]||[0,0])[0]++;if(anon(w[2]))am[m][1]++;}}
+  const ams=Object.keys(am).sort();
+  newChart($("#anonC"),{type:"bar",data:{labels:ams,
+      datasets:[{label:"% anonymous",data:ams.map(m=>+(100*am[m][1]/am[m][0]).toFixed(0)),backgroundColor:ams.map(m=>m>="2026-04"?"#FF6F91":"#7d8f87")}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+"% of that month's winners are anonymous"}}},
+      scales:{y:{min:0,max:100,ticks:{callback:v=>v+"%"}},x:{ticks:{maxRotation:60}}}}});
   const tl=DATA.timeline.filter(t=>t[0]>="2022-10");
   newChart($("#tline"),{type:"bar",data:{labels:tl.map(t=>t[0]),
       datasets:[{label:"claims",data:tl.map(t=>t[1]),backgroundColor:"#FF6F91"}]},
