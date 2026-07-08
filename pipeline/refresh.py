@@ -311,6 +311,244 @@ def build_db(games_api,parses,census,geo):
 # ---------------- emit data.js ----------------
 POP={"Alachua":290028,"Baker":29737,"Bay":204479,"Bradford":28307,"Brevard":663982,"Broward":2013317,"Calhoun":13289,"Charlotte":217212,"Citrus":171666,"Clay":239593,"Collier":417131,"Columbia":74094,"DeSoto":37078,"Dixie":18038,"Duval":1062963,"Escambia":333834,"Flagler":140360,"Franklin":13029,"Gadsden":44298,"Gilchrist":20488,"Glades":13270,"Gulf":15943,"Hamilton":14180,"Hardee":25932,"Hendry":48276,"Hernando":221701,"Highlands":111122,"Hillsborough":1574115,"Holmes":20119,"Indian River":172799,"Jackson":49629,"Jefferson":16007,"Lafayette":8792,"Lake":456068,"Lee":875607,"Leon":299048,"Levy":48520,"Liberty":8035,"Madison":18759,"Manatee":468200,"Marion":442660,"Martin":166272,"Miami-Dade":2802029,"Monroe":80406,"Nassau":106879,"Okaloosa":221810,"Okeechobee":42608,"Orange":1528002,"Osceola":481718,"Palm Beach":1575726,"Pasco":674516,"Pinellas":948563,"Polk":874790,"Putnam":77734,"St. Johns":346328,"St. Lucie":402449,"Santa Rosa":211115,"Sarasota":479958,"Seminole":491884,"Sumter":157772,"Suwannee":48149,"Taylor":21210,"Union":16250,"Volusia":606573,"Wakulla":38089,"Walton":93288,"Washington":26695}
 def tier5(v): return 1 if v is None else 5 if v>=25e6 else 4 if v>=5e6 else 3 if v>=2e6 else 2 if v>=1e6 else 1
+
+# ---------------- per-game OG stub pages + share cards ----------------
+SITE="https://flscratchstats.com"
+def _hesc(s):
+    """Escape for HTML text AND double-quoted attributes / SVG text nodes."""
+    return (html.escape(str(s if s is not None else ""),quote=True)
+            .replace("'","&#39;"))
+def _moneyc(v):
+    """Compact money like the site's money(): $25M / $250k / $1,234."""
+    try: v=float(v)
+    except (TypeError,ValueError): return "—"
+    a=abs(v)
+    if a>=1e6:
+        s=v/1e6; return f"${s:.0f}M" if abs(s-round(s))<0.05 else f"${s:.1f}M"
+    if a>=1e3:
+        s=v/1e3; return f"${s:.0f}k" if abs(s-round(s))<0.05 else f"${s:.1f}k"
+    return "${:,.0f}".format(v)
+def _clamp(v,a,b): return a if v<a else b if v>b else v
+def _value_score(g,tiers):
+    """Reproduce app.js Value Score (0-100). tiers = positional rows for this game.
+       Returns int score or None (ended / no EV / degenerate)."""
+    try:
+        vpd_now=g.get("value_per_dollar_now"); on=g.get("on_sale")
+        if vpd_now is None or not on: return None
+        price=g.get("ticket_price") or 0
+        pProfit=0.0
+        for t in (tiers or []):
+            odds=t[2] if len(t)>2 else None; val=t[1] if len(t)>1 else None
+            if odds and odds>0 and val is not None and val>price:
+                pProfit+=1.0/odds
+        tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
+        dead=bool(on and tp_rem==0)
+        evN=_clamp((vpd_now-0.55)/(0.95-0.55),0,1)
+        prN=_clamp((pProfit-0.03)/(0.15-0.03),0,1)
+        frN=_clamp((g.get("pct_value_remaining") or 0)/100.0,0,1)
+        if dead: jH=0.0
+        elif tp_tot: jH=_clamp((tp_rem or 0)/tp_tot,0,1)*0.5+0.5
+        else: jH=0.5
+        sc=round(100*(0.45*evN+0.20*prN+0.20*frN+0.15*jH))
+        if dead: sc=min(sc,34)
+        return int(sc)
+    except Exception:
+        return None
+def _score_band(s):
+    if s is None: return ("—","#8FD9D2")
+    if s>=70: return ("Excellent","#2FB6A8")
+    if s>=55: return ("Good","#8FD9D2")
+    if s>=40: return ("Fair","#FF9E4A")
+    return ("Avoid","#E24B5B")
+def _og_svg(g,tiers):
+    """1200x630 flamingo dark-theme stat card as a standalone SVG string."""
+    name=_hesc(g.get("game_name") or f"Game #{g.get('game_no','')}")
+    no=_hesc(g.get("game_no") or "")
+    price=g.get("ticket_price")
+    price_s="$"+(f"{price:.0f}" if price is not None and abs(price-round(price))<0.05 else (f"{price}" if price is not None else "?"))
+    top_s=_moneyc(g.get("top_prize_value_num"))
+    evraw=g.get("value_per_dollar_now")
+    ev_s=("$"+f"{evraw:.2f}") if evraw is not None else "—"
+    tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
+    rem_s=("{:,}".format(tp_rem) if tp_rem is not None else "—")+((" of {:,}".format(tp_tot)) if tp_tot else "")
+    sc=_value_score(g,tiers); sc_s=str(sc) if sc is not None else "—"
+    band,bc=_score_band(sc)
+    # truncate very long names to keep the card readable (~26 chars per line, 2 lines)
+    def wrap(t,width=24,maxlines=2):
+        words=t.split(" "); lines=[]; cur=""
+        for w in words:
+            if len(cur)+len(w)+(1 if cur else 0)<=width: cur=(cur+" "+w).strip()
+            else:
+                lines.append(cur); cur=w
+                if len(lines)==maxlines: break
+        if cur and len(lines)<maxlines: lines.append(cur)
+        if len(lines)==maxlines and (len(words)>sum(len(l.split(' ')) for l in lines)):
+            lines[-1]=lines[-1][:width-1].rstrip()+"…"
+        return lines[:maxlines]
+    title_lines=wrap(g.get("game_name") or f"Game #{g.get('game_no','')}")
+    ty=200
+    title_svg=""
+    for i,ln in enumerate(title_lines):
+        title_svg+=f'<text x="80" y="{ty+i*74}" font-family="Georgia,\'Times New Roman\',serif" font-size="64" font-weight="700" fill="#F4E7D3">{_hesc(ln)}</text>'
+    def cell(x,label,value,vcolor="#F4E7D3"):
+        return (f'<text x="{x}" y="470" font-family="Arial,Helvetica,sans-serif" font-size="26" fill="#9aa4ad" letter-spacing="1">{_hesc(label)}</text>'
+                f'<text x="{x}" y="530" font-family="Georgia,\'Times New Roman\',serif" font-size="56" font-weight="700" fill="{vcolor}">{_hesc(value)}</text>')
+    cells=(cell(80,"PRICE",price_s)
+           +cell(320,"TOP PRIZE",top_s,"#FF9E4A")
+           +cell(640,"EV / $1",ev_s,"#2FB6A8")
+           +cell(900,"VALUE SCORE",f"{sc_s}",bc))
+    return (
+'<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">'
+'<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
+'<stop offset="0" stop-color="#181014"/><stop offset="1" stop-color="#0e0b10"/></linearGradient>'
+'<linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">'
+'<stop offset="0" stop-color="#FF6F91"/><stop offset="1" stop-color="#FF9E4A"/></linearGradient></defs>'
+'<rect width="1200" height="630" fill="url(#bg)"/>'
+'<rect x="0" y="0" width="1200" height="14" fill="url(#accent)"/>'
+f'<text x="80" y="110" font-family="Arial,Helvetica,sans-serif" font-size="30" fill="#FF6F91" letter-spacing="3" font-weight="700">FLSCRATCHSTATS.COM</text>'
+f'<text x="80" y="150" font-family="Arial,Helvetica,sans-serif" font-size="24" fill="#9aa4ad">Florida Scratch-Off &#183; Game #{no}</text>'
+f'{title_svg}'
+'<line x1="80" y1="410" x2="1120" y2="410" stroke="#2a2230" stroke-width="2"/>'
+f'{cells}'
+f'<text x="80" y="590" font-family="Arial,Helvetica,sans-serif" font-size="24" fill="#9aa4ad">Top prizes remaining: {_hesc(rem_s)} &#183; {_hesc(band)}</text>'
+'</svg>')
+def _stub_html(g,tiers,og_image):
+    no=_hesc(g.get("game_no") or "")
+    name=g.get("game_name") or f"Game #{g.get('game_no','')}"
+    name_e=_hesc(name)
+    price=g.get("ticket_price")
+    price_s="$"+(f"{price:.0f}" if price is not None and abs(price-round(price))<0.05 else (f"{price}" if price is not None else "?"))
+    top_s=_moneyc(g.get("top_prize_value_num"))
+    evraw=g.get("value_per_dollar_now")
+    ev_s=("$"+f"{evraw:.2f}"+" per $1") if evraw is not None else "n/a"
+    tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
+    rem_s=("{:,}".format(tp_rem) if tp_rem is not None else "?")+((" of {:,}".format(tp_tot)) if tp_tot else "")
+    sc=_value_score(g,tiers)
+    desc=(f"{price_s} ticket · top prize {top_s} · "
+          f"EV {ev_s} · {rem_s} top prizes left"
+          +(f" · Value Score {sc}/100" if sc is not None else ""))
+    desc_e=_hesc(desc)
+    title=_hesc(f"{name} - FL Scratch-Off #{g.get('game_no','')}")
+    url=f"{SITE}/g/{no}.html"
+    hashurl=f"{SITE}/#game/{no}"
+    img=_hesc(og_image)
+    return f"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<meta name="description" content="{desc_e}">
+<link rel="canonical" href="{_hesc(hashurl)}">
+<meta property="og:type" content="article">
+<meta property="og:title" content="{title}">
+<meta property="og:description" content="{desc_e}">
+<meta property="og:url" content="{_hesc(url)}">
+<meta property="og:image" content="{img}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="FL Scratch-Off Statistician">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{title}">
+<meta name="twitter:description" content="{desc_e}">
+<meta name="twitter:image" content="{img}">
+<script>location.replace("/#game/{no}");</script>
+<style>body{{margin:0;background:#181014;color:#F4E7D3;font-family:Arial,Helvetica,sans-serif;line-height:1.5}}
+main{{max-width:640px;margin:0 auto;padding:40px 24px}}h1{{font-family:Georgia,serif;color:#FF6F91}}
+dt{{color:#9aa4ad;font-size:13px;letter-spacing:1px;text-transform:uppercase;margin-top:14px}}
+dd{{margin:2px 0 0;font-size:22px}}a{{color:#2FB6A8}}</style>
+</head><body>
+<noscript><p><a href="/#game/{no}">View {name_e} on flscratchstats.com &#8594;</a></p></noscript>
+<main>
+<h1>{name_e}</h1>
+<p><a href="/#game/{no}">Open full stats &#8594;</a> (redirecting&#8230;)</p>
+<dl>
+<dt>Ticket price</dt><dd>{_hesc(price_s)}</dd>
+<dt>Top prize</dt><dd>{_hesc(top_s)}</dd>
+<dt>Expected value</dt><dd>{_hesc(ev_s)}</dd>
+<dt>Top prizes remaining</dt><dd>{_hesc(rem_s)}</dd>
+{f'<dt>Value Score</dt><dd>{sc}/100</dd>' if sc is not None else ''}
+</dl>
+<p style="color:#9aa4ad;font-size:14px">Independent, free Florida scratch-off statistics. Game #{no}.</p>
+</main>
+</body></html>"""
+def write_stub_pages(D):
+    """Emit per-game OG stub pages (public/g/<no>.html) + share cards (public/og/<no>.svg,
+       and .png if Pillow available). Pure local writes; never raises."""
+    try:
+        gdir=os.path.join(PUB,"g"); odir=os.path.join(PUB,"og")
+        os.makedirs(gdir,exist_ok=True); os.makedirs(odir,exist_ok=True)
+        tiers_all=D.get("tiers") or {}
+        # optional rasterizer
+        have_pil=False
+        try:
+            import PIL  # noqa: F401
+            have_pil=True
+        except Exception:
+            have_pil=False
+        n=0; npng=0
+        for g in D.get("games") or []:
+            no=g.get("game_no")
+            if not no: continue
+            no=str(no)
+            if not re.fullmatch(r"[A-Za-z0-9_-]+",no):  # path-safety
+                continue
+            tiers=tiers_all.get(no) or []
+            try:
+                svg=_og_svg(g,tiers)
+                with open(os.path.join(odir,f"{no}.svg"),"w",encoding="utf-8") as f:
+                    f.write(svg)
+                og_rel=f"{SITE}/og/{no}.svg"
+                if have_pil:
+                    png_path=os.path.join(odir,f"{no}.png")
+                    if _svg_to_png(svg,png_path):
+                        og_rel=f"{SITE}/og/{no}.png"; npng+=1
+                with open(os.path.join(gdir,f"{no}.html"),"w",encoding="utf-8") as f:
+                    f.write(_stub_html(g,tiers,og_rel))
+                n+=1
+            except Exception as e:
+                print("   stub fail",no,e)
+        print(f"· wrote {n} OG stub pages"+(f" (+{npng} PNG cards)" if npng else " (SVG cards)"))
+    except Exception as e:
+        print("   write_stub_pages failed (non-fatal):",e)
+def _svg_to_png(svg,path):
+    """Best-effort rasterize the OG SVG to a 1200x630 PNG using Pillow, WITHOUT any
+       external SVG renderer: re-draw the card natively with PIL primitives so it works
+       even though Pillow cannot parse SVG. Returns True on success."""
+    try:
+        from PIL import Image,ImageDraw,ImageFont
+    except Exception:
+        return False
+    try:
+        import xml.etree.ElementTree as ET
+        # Parse just the text nodes we emitted so the PNG mirrors the SVG content.
+        root=ET.fromstring(svg)
+        ns="{http://www.w3.org/2000/svg}"
+        texts=[(t.get("x"),t.get("y"),t.get("fill") or "#F4E7D3",
+                int(float(t.get("font-size","24"))),t.text or "") for t in root.iter(ns+"text")]
+        img=Image.new("RGB",(1200,630),(24,16,20)); d=ImageDraw.Draw(img)
+        d.rectangle([0,0,1200,14],fill=(255,111,145))
+        d.line([80,410,1120,410],fill=(42,34,48),width=2)
+        def font(sz,bold=False):
+            for name in (["Georgia Bold.ttf","Arial Bold.ttf"] if bold else ["Georgia.ttf","Arial.ttf",
+                         "DejaVuSans.ttf"]):
+                try: return ImageFont.truetype(name,sz)
+                except Exception: continue
+            try: return ImageFont.truetype("DejaVuSans.ttf",sz)
+            except Exception: return ImageFont.load_default()
+        def hexrgb(h):
+            h=(h or "#F4E7D3").lstrip("#")
+            if len(h)==3: h="".join(c*2 for c in h)
+            try: return tuple(int(h[i:i+2],16) for i in (0,2,4))
+            except Exception: return (244,231,211)
+        for x,y,fill,sz,txt in texts:
+            try: xi=int(float(x)); yi=int(float(y))
+            except Exception: continue
+            txt=html.unescape(txt)
+            d.text((xi,yi-sz),txt,fill=hexrgb(fill),font=font(sz,sz>=40))
+        img.save(path,"PNG")
+        return True
+    except Exception:
+        return False
 def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     con.row_factory=sqlite3.Row; D={}
     D["games"]=[{k:r[k] for k in r.keys()} for r in con.execute("""SELECT g.*,a.est_tickets_printed,a.est_tickets_remaining,
@@ -402,6 +640,8 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
         json.dump(hist,open(hpath,"w"),separators=(",",":"))
     with open(os.path.join(PUB,"data.js"),"w") as f:
         f.write("const DATA="); json.dump(D,f,separators=(",",":")); f.write(";")
+    # per-game OG stub pages + social share cards (defensive; never breaks the build)
+    write_stub_pages(D)
     return D["meta"]
 
 def main():
