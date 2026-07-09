@@ -490,25 +490,102 @@ f'{title_svg}'
 f'{cells}'
 f'<text x="80" y="590" font-family="Arial,Helvetica,sans-serif" font-size="24" fill="#9aa4ad">Top prizes remaining: {_hesc(rem_s)} &#183; {_hesc(band)}</text>'
 '</svg>')
-def _stub_html(g,tiers,og_image):
+# ---- shared static-page chrome for stubs + SEO landing pages ----
+_PAGE_CSS=("body{margin:0;background:#0f1e1c;color:#ece8dd;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.6}"
+ "main{max-width:860px;margin:0 auto;padding:30px 22px 20px}"
+ "h1{font-family:Georgia,'Times New Roman',serif;color:#FF6F91;font-size:31px;line-height:1.15;margin:0 0 8px}"
+ "h2{font-family:Georgia,serif;font-size:21px;margin:30px 0 10px}"
+ "a{color:#2FB6A8;text-decoration:none}a:hover{text-decoration:underline}"
+ "table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}"
+ "th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #2b423c}"
+ "th{color:#9db0a7;font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}"
+ "td.r,th.r{text-align:right}"
+ ".lead{font-size:17px}.muted{color:#9db0a7;font-size:14px}"
+ ".cta{display:inline-block;margin:8px 0;background:#16292d;border:1px solid #2b423c;border-radius:9px;padding:9px 15px;color:#8FD9D2;font-weight:600}"
+ ".rel{margin:22px 0 6px}.rel a{display:inline-block;margin:0 14px 8px 0}"
+ "nav.pricebar{margin:4px 0 2px;font-size:14px}nav.pricebar a{margin-right:13px;white-space:nowrap}"
+ "footer{max-width:860px;margin:0 auto;padding:16px 22px 46px;color:#6a7c74;font-size:12px;line-height:1.6;border-top:1px solid #2b423c}")
+
+_ALL_PRICES=[]
+
+def _pricebar(prices):
+    if not prices: return ""
+    links=" ".join(f'<a href="/florida-{int(p)}-scratch-offs">${int(p)}</a>' for p in prices)
+    return f'<nav class="pricebar" aria-label="Browse by price">Browse by price: {links}</nav>'
+
+def _foot():
+    return ('<footer>Independent hobby project &#183; not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida. '
+     'Figures derive from public Florida Lottery data and update nightly &#8212; verify with the Florida Lottery before purchasing. '
+     'Every scratch-off is negative expected value by design; nothing here improves your odds. Play responsibly &#183; 1-888-ADMIT-IT (18+).'
+     ' &#183; <a href="/">Home</a> &#183; <a href="/best-value">Best value</a> &#183; <a href="/florida-scratch-offs-most-prizes-left">Most prizes left</a> &#183; <a href="/florida-scratch-offs-ending-soon">Ending soon</a> &#183; <a href="/about.html">About &amp; methodology</a></footer>')
+
+def _siblings(D,g):
+    p=g.get("ticket_price"); no=str(g.get("game_no"))
+    if p is None: return []
+    sibs=[x for x in (D.get("games") or []) if x.get("on_sale") and x.get("ticket_price")==p and str(x.get("game_no"))!=no and x.get("game_name")]
+    sibs.sort(key=lambda x:-(x.get("value_per_dollar_now") or 0))
+    return [(str(x.get("game_no")),x.get("game_name")) for x in sibs[:4]]
+
+def _stub_html(g,tiers,og_image,related=None,prices=None):
     no=_hesc(g.get("game_no") or "")
     name=g.get("game_name") or f"Game #{g.get('game_no','')}"
     name_e=_hesc(name)
     price=g.get("ticket_price")
     price_s="$"+(f"{price:.0f}" if price is not None and abs(price-round(price))<0.05 else (f"{price}" if price is not None else "?"))
     top_s=_moneyc(g.get("top_prize_value_num"))
+    top_disp=_hesc(g.get("top_prize_display") or top_s)
     evraw=g.get("value_per_dollar_now")
     ev_s=("$"+f"{evraw:.2f}"+" per $1") if evraw is not None else "n/a"
+    odds=g.get("overall_odds_1_in")
+    odds_s=(f"1 in {odds}") if odds is not None else "n/a"
     tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
     rem_s=("{:,}".format(tp_rem) if tp_rem is not None else "?")+((" of {:,}".format(tp_tot)) if tp_tot else "")
     sc=_value_score(g,tiers)
-    desc=(f"{price_s} ticket · top prize {top_s} · "
-          f"EV {ev_s} · {rem_s} top prizes left"
-          +(f" · Value Score {sc}/100" if sc is not None else ""))
+    lq=(g.get("last_queried") or "")[:10].strip()
+    launch=(g.get("launch_date") or "")[:10]; redeem=(g.get("redemption_date") or "")[:10]
+    if len(name)<=34:
+        title=_hesc(f"{name} Florida Scratch-Off Odds & Prizes Remaining ({price_s})")
+    else:
+        title=_hesc(f"{name} — FL Scratch-Off Odds & Prizes Left")
+    desc=(f"{name}: {price_s} Florida scratch-off — {rem_s} top prizes left, EV {ev_s}"
+          +(f", Value Score {sc}/100" if sc is not None else "")+f". Updated {lq}. Not affiliated with the Florida Lottery.")
     desc_e=_hesc(desc)
-    title=_hesc(f"{name} - FL Scratch-Off #{g.get('game_no','')}")
-    url=f"{SITE}/g/{no}"   # the crawlable 200 endpoint (Cloudflare serves /g/<no>.html here); self-canonical
+    url=f"{SITE}/g/{no}"
     img=_hesc(og_image)
+    trows=""
+    for t in (tiers or []):
+        disp=t[0] if len(t)>0 else None
+        od=t[2] if len(t)>2 else None
+        rem=t[3] if len(t)>3 else None
+        tot=t[4] if len(t)>4 else None
+        if disp is None: continue
+        trows+=("<tr><td>"+_hesc(str(disp))+"</td>"
+                +'<td class="r">'+(f"1 in {od:,.0f}" if isinstance(od,(int,float)) and od else "&#8212;")+"</td>"
+                +'<td class="r">'+(f"{int(tot):,}" if isinstance(tot,(int,float)) else "&#8212;")+"</td>"
+                +'<td class="r">'+(f"{int(rem):,}" if isinstance(rem,(int,float)) else "&#8212;")+"</td></tr>")
+    tier_table=(f'<h2>Prize tiers &amp; odds</h2><table><thead><tr><th>Prize</th><th class="r">Odds</th><th class="r">Total printed</th><th class="r">Remaining</th></tr></thead><tbody>{trows}</tbody></table>' if trows else "")
+    lead=(f'<p class="lead">{name_e} is a {price_s} Florida Lottery scratch-off game with a {top_disp} top prize and overall odds of {odds_s}. '
+          +(f'As of {lq}, {rem_s} top prizes remain' if tp_rem is not None else 'See the live prize table below')
+          +(f' and its expected value is {ev_s} — a Value Score of {sc}/100.' if sc is not None else '.')+"</p>")
+    meaning=('<p class="muted">Expected value is how much of each $1 comes back on average across every remaining ticket. '
+             'Like every scratch-off, this game is negative expected value by design — a higher Value Score just means less-bad, not a way to win. '
+             'Odds and prize counts change constantly; verify with the Florida Lottery before buying.</p>')
+    life=""
+    if launch or redeem:
+        life='<p class="muted">'+((f"On sale since {launch}. " if launch else "")+(f"Winning tickets are redeemable through {redeem}." if redeem else "")).strip()+"</p>"
+    rel=""
+    if related:
+        rel='<div class="rel"><b>Other '+price_s+' Florida scratch-offs:</b><br>'+" ".join(f'<a href="/g/{_hesc(rn)}">{_hesc(rnm)}</a>' for rn,rnm in related)+'</div>'
+    hub='<div class="rel"><b>Compare all games:</b> <a href="/best-value">Best value now</a> &#183; '
+    if price is not None:
+        hub+=f'<a href="/florida-{int(price)}-scratch-offs">All ${int(price)} games</a> &#183; '
+    hub+='<a href="/florida-scratch-offs-most-prizes-left">Most prizes left</a> &#183; <a href="/florida-scratch-offs-ending-soon">Ending soon</a></div>'
+    pb=_pricebar(prices) if prices else ""
+    import json as _json
+    ld=_json.dumps({"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+        {"@type":"ListItem","position":1,"name":"Home","item":f"{SITE}/"},
+        {"@type":"ListItem","position":2,"name":"Best-value scratch-offs","item":f"{SITE}/best-value"},
+        {"@type":"ListItem","position":3,"name":name,"item":url}]},separators=(",",":"))
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -516,6 +593,7 @@ def _stub_html(g,tiers,og_image):
 <title>{title}</title>
 <meta name="description" content="{desc_e}">
 <link rel="canonical" href="{_hesc(url)}">
+<meta name="robots" content="index,follow">
 <meta property="og:type" content="article">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{desc_e}">
@@ -523,31 +601,152 @@ def _stub_html(g,tiers,og_image):
 <meta property="og:image" content="{img}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:site_name" content="FL Scratch-Off Statistician">
+<meta property="og:site_name" content="Florida Scratch-Off Statistician">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{title}">
 <meta name="twitter:description" content="{desc_e}">
 <meta name="twitter:image" content="{img}">
-<script>location.replace("/#game/{no}");</script>
-<style>body{{margin:0;background:#181014;color:#F4E7D3;font-family:Arial,Helvetica,sans-serif;line-height:1.5}}
-main{{max-width:640px;margin:0 auto;padding:40px 24px}}h1{{font-family:Georgia,serif;color:#FF6F91}}
-dt{{color:#9aa4ad;font-size:13px;letter-spacing:1px;text-transform:uppercase;margin-top:14px}}
-dd{{margin:2px 0 0;font-size:22px}}a{{color:#2FB6A8}}</style>
+<style>{_PAGE_CSS}</style>
+<script type="application/ld+json">{ld}</script>
 </head><body>
-<noscript><p><a href="/#game/{no}">View {name_e} on flscratchstats.com &#8594;</a></p></noscript>
 <main>
-<h1>{name_e}</h1>
-<p><a href="/#game/{no}">Open full stats &#8594;</a> (redirecting&#8230;)</p>
-<dl>
-<dt>Ticket price</dt><dd>{_hesc(price_s)}</dd>
-<dt>Top prize</dt><dd>{_hesc(top_s)}</dd>
-<dt>Expected value</dt><dd>{_hesc(ev_s)}</dd>
-<dt>Top prizes remaining</dt><dd>{_hesc(rem_s)}</dd>
-{f'<dt>Value Score</dt><dd>{sc}/100</dd>' if sc is not None else ''}
-</dl>
-<p style="color:#9aa4ad;font-size:14px">Independent, free Florida scratch-off statistics. Game #{no}.</p>\n<p style="color:#6a7c74;font-size:12px">Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida. Every scratch-off is negative expected value as designed. Play responsibly &#183; 1-888-ADMIT-IT.</p>
+<p class="muted"><a href="/">Florida Scratch-Off Statistician</a> &rsaquo; <a href="/best-value">Best value</a> &rsaquo; {name_e}</p>
+<h1>{name_e} &#8212; Florida Scratch-Off</h1>
+{lead}
+<p><a class="cta" href="/#game/{no}">Open the interactive version with charts &amp; winners &#8594;</a></p>
+{tier_table}
+{life}
+{meaning}
+{rel}
+{hub}
+{pb}
 </main>
+{_foot()}
 </body></html>"""
+
+def _landing_html(title,desc,path,h1,intro_html,table_html,prices,itemlist=None):
+    url=f"{SITE}{path}"
+    import json as _json
+    ld_blocks=[_json.dumps({"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+        {"@type":"ListItem","position":1,"name":"Home","item":f"{SITE}/"},
+        {"@type":"ListItem","position":2,"name":h1,"item":url}]},separators=(",",":"))]
+    if itemlist:
+        ld_blocks.append(_json.dumps({"@context":"https://schema.org","@type":"ItemList","name":h1,
+            "itemListElement":[{"@type":"ListItem","position":i+1,"name":nm,"url":f"{SITE}/g/{gn}"} for i,(gn,nm) in enumerate(itemlist[:25])]},separators=(",",":")))
+    lds="".join(f'<script type="application/ld+json">{b}</script>' for b in ld_blocks)
+    return f"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_hesc(title)}</title>
+<meta name="description" content="{_hesc(desc)}">
+<link rel="canonical" href="{_hesc(url)}">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{_hesc(title)}">
+<meta property="og:description" content="{_hesc(desc)}">
+<meta property="og:url" content="{_hesc(url)}">
+<meta property="og:image" content="{SITE}/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="Florida Scratch-Off Statistician">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{_hesc(title)}">
+<meta name="twitter:description" content="{_hesc(desc)}">
+<meta name="twitter:image" content="{SITE}/og-home.png">
+<style>{_PAGE_CSS}</style>
+{lds}
+</head><body>
+<main>
+<p class="muted"><a href="/">Florida Scratch-Off Statistician</a> &rsaquo; {_hesc(h1)}</p>
+<h1>{_hesc(h1)}</h1>
+{intro_html}
+{_pricebar(prices)}
+{table_html}
+<p><a class="cta" href="/">Explore the full interactive site &#8594;</a></p>
+</main>
+{_foot()}
+</body></html>"""
+
+_LTIERS={}
+def _game_row(g,cols):
+    no=_hesc(g.get("game_no") or ""); nm=_hesc(g.get("game_name") or "")
+    price=g.get("ticket_price"); sc=_value_score(g,_LTIERS.get(str(g.get("game_no")),[]))
+    ev=g.get("value_per_dollar_now"); tpr=g.get("top_prizes_remaining"); tpt=g.get("top_prizes_total")
+    cellmap={
+        "game":f'<td><a href="/g/{no}">{nm}</a></td>',
+        "price":'<td class="r">$'+(f"{price:.0f}" if price is not None else "?")+"</td>",
+        "score":'<td class="r">'+(str(sc) if sc is not None else "&#8212;")+"</td>",
+        "ev":'<td class="r">'+(f"${ev:.2f}" if ev is not None else "&#8212;")+"</td>",
+        "top":"<td>"+_hesc(g.get("top_prize_display") or _moneyc(g.get("top_prize_value_num")))+"</td>",
+        "tpr":'<td class="r">'+((f"{tpr:,}"+(f" of {tpt:,}" if tpt else "")) if tpr is not None else "&#8212;")+"</td>",
+        "odds":'<td class="r">'+(f"1 in {g.get('overall_odds_1_in')}" if g.get("overall_odds_1_in") is not None else "&#8212;")+"</td>",
+        "pctleft":'<td class="r">'+(f"{g.get('pct_value_remaining'):.0f}%" if g.get("pct_value_remaining") is not None else "&#8212;")+"</td>",
+        "redeem":"<td>"+_hesc((g.get("redemption_date") or "")[:10] or "&#8212;")+"</td>",
+    }
+    return "<tr>"+"".join(cellmap[c] for c in cols)+"</tr>"
+
+def write_landing_pages(D):
+    """Emit static SEO landing pages (best-value, per-price, most-prizes-left, ending-soon)."""
+    try:
+        global _LTIERS
+        _LTIERS=D.get("tiers") or {}
+        games=[g for g in (D.get("games") or []) if g.get("game_no")]
+        onsale=[g for g in games if g.get("on_sale")]
+        prices=sorted({int(g["ticket_price"]) for g in games if g.get("ticket_price")})
+        built=(D.get("meta") or {}).get("built","")
+        def score(g): return _value_score(g,_LTIERS.get(str(g.get("game_no")),[]))
+        def tbl(rows,cols,head):
+            return "<table><thead><tr>"+head+"</tr></thead><tbody>"+"".join(_game_row(g,cols) for g in rows)+"</tbody></table>"
+        def write(path,html):
+            with open(os.path.join(PUB,path.lstrip("/")+".html"),"w",encoding="utf-8") as f: f.write(html)
+
+        bv=[g for g in onsale if g.get("value_per_dollar_now") is not None]; bv.sort(key=lambda g:-g["value_per_dollar_now"])
+        head='<th>Game</th><th class="r">Price</th><th class="r">Value Score</th><th class="r">EV per $1</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">% value left</th>'
+        cols=["game","price","score","ev","top","tpr","pctleft"]
+        top10=", ".join(f'<a href="/g/{_hesc(g["game_no"])}">{_hesc(g["game_name"])}</a>' for g in bv[:10])
+        intro=(f'<p class="lead">The Florida scratch-off games with the most prize value left per dollar right now, ranked by expected value. Updated {built}.</p>'
+               '<p class="muted">Value Score (0&#8211;100) blends current expected value, profit odds, freshness, and jackpot health. Every scratch-off is negative expected value &#8212; the best games return about $0.80&#8211;0.92 per $1, so &ldquo;best value&rdquo; means least-bad, never profitable. Play responsibly.</p>'
+               +(f'<p><b>Top 10 right now:</b> {top10}.</p>' if top10 else ""))
+        write("/best-value",_landing_html("Best-Value Florida Scratch-Off Tickets to Buy (2026) — Ranked",
+            f"Every active Florida scratch-off ranked by expected value and prizes remaining, updated {built}. Independent live stats. Every scratch-off is negative EV — play responsibly.",
+            "/best-value","Best-Value Florida Scratch-Offs Right Now",intro,tbl(bv,cols,head),prices,
+            itemlist=[(g["game_no"],g["game_name"]) for g in bv[:25]]))
+
+        for p in prices:
+            gp=[g for g in onsale if g.get("ticket_price") and int(g["ticket_price"])==p]; gp.sort(key=lambda g:-((score(g) or -1)))
+            head2='<th>Game</th><th class="r">Overall odds</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">EV per $1</th><th class="r">Value Score</th>'
+            cols2=["game","odds","top","tpr","ev","score"]
+            intro2=(f'<p class="lead">Every active ${p} Florida Lottery scratch-off, ranked by value. Updated {built}.</p>'
+                    f'<p class="muted">All active ${p} games below, with overall odds, top prize, top prizes remaining, and expected value. Every scratch-off is negative EV; a higher Value Score is less-bad, not profitable. Play responsibly.</p>')
+            write(f"/florida-{p}-scratch-offs",_landing_html(f"Florida ${p} Scratch-Off Tickets — Odds, Best Value & Prizes Left",
+                f"Every Florida ${p} scratch-off ranked by odds, expected value, and top prizes remaining. Independent live stats, updated {built}.",
+                f"/florida-{p}-scratch-offs",f"Florida ${p} Scratch-Off Tickets",intro2,tbl(gp,cols2,head2),prices,
+                itemlist=[(g["game_no"],g["game_name"]) for g in gp[:25]]))
+
+        mp=[g for g in onsale if (g.get("top_prizes_remaining") or 0)>0]; mp.sort(key=lambda g:(-(g.get("top_prizes_remaining") or 0),-(g.get("top_prize_value_num") or 0)))
+        head3='<th>Game</th><th class="r">Price</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">Value Score</th>'
+        cols3=["game","price","top","tpr","score"]
+        intro3=(f'<p class="lead">Active Florida scratch-offs with the most top prizes still unclaimed, updated {built}.</p>'
+                '<p class="muted">More top prizes remaining does not mean better odds &#8212; a game can have many left simply because few tickets have sold. Cross-check the Value Score and play responsibly.</p>')
+        write("/florida-scratch-offs-most-prizes-left",_landing_html("Florida Scratch-Offs With the Most Top Prizes Remaining (2026)",
+            f"Active Florida scratch-off games ranked by top prizes still unclaimed, updated {built}. Independent live stats — play responsibly.",
+            "/florida-scratch-offs-most-prizes-left","Florida Scratch-Offs With the Most Top Prizes Left",intro3,tbl(mp,cols3,head3),prices,
+            itemlist=[(g["game_no"],g["game_name"]) for g in mp[:25]]))
+
+        es=[g for g in games if (g.get("redemption_date") and not g.get("on_sale"))]; es.sort(key=lambda g:(g.get("redemption_date") or "9999"))
+        head4='<th>Game</th><th class="r">Price</th><th>Top prize</th><th class="r">Redeem by</th>'
+        cols4=["game","price","top","redeem"]
+        intro4=(f'<p class="lead">Florida scratch-off games that have ended sales &#8212; winning tickets are still redeemable until the deadline shown. Updated {built}.</p>'
+                '<p class="muted">After a game ends, prizes stay claimable only until the redemption deadline. Holding an old ticket from one of these games? Check it before the date passes.</p>')
+        write("/florida-scratch-offs-ending-soon",_landing_html("Florida Scratch-Offs Ending Soon — Redemption Deadlines (2026)",
+            f"Florida scratch-off games that ended sales and their ticket redemption deadlines, updated {built}. Do not let a winning ticket expire.",
+            "/florida-scratch-offs-ending-soon","Florida Scratch-Offs Ending Soon",intro4,tbl(es,cols4,head4),prices,
+            itemlist=[(g["game_no"],g["game_name"]) for g in es[:25]]))
+        print(f"· wrote {3+len(prices)} SEO landing pages")
+    except Exception as e:
+        print("   write_landing_pages failed (non-fatal):",e)
+
 def write_stub_pages(D):
     """Emit per-game OG stub pages (public/g/<no>.html) + share cards (public/og/<no>.svg,
        and .png if Pillow available). Pure local writes; never raises."""
@@ -570,6 +769,8 @@ def write_stub_pages(D):
                     if ext in _exts and stem not in live:
                         os.remove(os.path.join(_dir,fn))
             except Exception: pass
+        global _ALL_PRICES
+        _ALL_PRICES=sorted({int(g['ticket_price']) for g in (D.get('games') or []) if g.get('ticket_price')})
         n=0; npng=0; sitemap=[]
         for g in D.get("games") or []:
             no=g.get("game_no")
@@ -599,19 +800,20 @@ def write_stub_pages(D):
                 og_rel=f"{SITE}/og/{no}.png" if have_png else f"{SITE}/og/{no}.svg"
                 if have_png: npng+=1
                 with open(html_path,"w",encoding="utf-8") as f:
-                    f.write(_stub_html(g,tiers,og_rel))
+                    f.write(_stub_html(g,tiers,og_rel,related=_siblings(D,g),prices=_ALL_PRICES))
                 n+=1
             except Exception as e:
                 print("   stub fail",no,e)
         print(f"· wrote/verified {n} OG stub pages"+(f" ({npng} PNG cards)" if npng else " (SVG cards)"))
         # sitemap.xml so the 94 (otherwise orphan) stub pages are discoverable by search crawlers
         today=time.strftime("%Y-%m-%d")
-        urls=[f"{SITE}/"]+[f"{SITE}/g/{no}" for no in sitemap]
+        urls=[f"{SITE}/", f"{SITE}/best-value", f"{SITE}/florida-scratch-offs-most-prizes-left", f"{SITE}/florida-scratch-offs-ending-soon"]+[f"{SITE}/florida-{p}-scratch-offs" for p in _ALL_PRICES]+[f"{SITE}/g/{no}" for no in sitemap]
         sm='<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
         sm+="".join(f"<url><loc>{u}</loc><lastmod>{today}</lastmod></url>\n" for u in urls)+"</urlset>\n"
         with open(os.path.join(PUB,"sitemap.xml"),"w",encoding="utf-8") as f: f.write(sm)
         with open(os.path.join(PUB,"robots.txt"),"w",encoding="utf-8") as f:
             f.write(f"User-agent: *\nAllow: /\nSitemap: {SITE}/sitemap.xml\n")
+        write_landing_pages(D)
     except Exception as e:
         print("   write_stub_pages failed (non-fatal):",e)
 def _svg_to_png(svg,path):
