@@ -272,6 +272,7 @@ FLX.routes.retailers=function(){
   </div>
   <div class="panel insight"><h2>Is any store "luckier"? <span class="hint">the honest answer</span></h2>
     <p class="rt-lead">No. Every top-prize winner is a random draw from tickets <em>sold</em>, so raw winner counts track <b>sales volume</b>. The fair comparison divides winners by each chain's store count — a real denominator from the ${num(R.total)}-store census — though even that assumes every store sells the same volume. Read <b>lift</b> below as winners per store vs. the statewide average: <b>1.0× = average</b>; above it means more tickets sold there, not better odds.</p></div>
+  <div class="panel"><h2>Where winning tickets actually come from <span class="hint">share of stores vs. share of winners, by store type</span></h2><div id="rt-types"></div></div>
   <div class="panel" id="rt-finder"><h2>Did my store ever sell a winner? <span class="hint">search the ${num(stores.length)} stores with a published top prize</span></h2>
     <div class="controls"><input type="text" id="rt-q" placeholder="Store name, street, or city…"></div>
     <div class="rt-chips" id="rt-chips"></div>
@@ -282,8 +283,7 @@ FLX.routes.retailers=function(){
     <div id="rt-chainT" class="rt-chain"></div>
     <div class="sortnote" id="rt-trap"></div>
   </div>
-  <div class="panel"><h2>Lightning does strike twice <span class="hint">two-time stores — and why that's expected</span></h2><div id="rt-dblbody"></div></div>
-  <div class="panel"><h2>Where winning tickets actually come from <span class="hint">share of stores vs. share of winners, by store type</span></h2><div id="rt-types"></div></div>`;
+  <div class="panel"><h2>Lightning does strike twice <span class="hint">two-time stores — and why that's expected</span></h2><div id="rt-dblbody"></div></div>`;
   let finder=null;
   try{finder=rtFinder(R,stores);}catch(e){const el=$("#rt-res");if(el)el.innerHTML='<p class="mut">Store finder failed to load.</p>';}
   try{rtChainTable(R,clock,finder);}catch(e){const el=$("#rt-chainT");if(el)el.innerHTML='<p class="mut">Chain table failed to load.</p>';}
