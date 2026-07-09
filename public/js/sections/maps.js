@@ -346,7 +346,7 @@ function render(){
       svg.append("line").attr("x1",x(v)).attr("x2",x(v)).attr("y1",FH-mB).attr("y2",FH-mB+5).attr("stroke","var(--border)");
       svg.append("text").attr("x",x(v)).attr("y",FH-mB+18).attr("text-anchor","middle").attr("font-size",11.5).attr("fill","var(--muted)").text(v);
     });
-    svg.append("text").attr("x",(mL+FW-mR)/2).attr("y",FH-6).attr("text-anchor","middle").attr("font-size",11.5).attr("fill","var(--dim)").text("expected winners = county share of "+W.length+" by population (log scale)");
+    svg.append("text").attr("x",(mL+FW-mR)/2).attr("y",FH-6).attr("text-anchor","middle").attr("font-size",11.5).attr("fill","var(--dim)").text("expected winners = county share of "+counties.reduce((s,c)=>s+(c.winners||0),0)+" ZIP-mapped winners by population (log scale)");
     svg.append("text").attr("x",mL).attr("y",mT-8).attr("font-size",11.5).attr("fill","var(--dim)").text("luck index = winners ÷ expected");
 
     const tip=document.createElement("div");tip.className="mx-tip";host.appendChild(tip);

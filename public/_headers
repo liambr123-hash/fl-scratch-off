@@ -1,0 +1,5 @@
+# vendored libraries + font never change between deploys — cache hard
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+/og-home.png
+  Cache-Control: public, max-age=604800

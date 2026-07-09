@@ -507,8 +507,7 @@ def _stub_html(g,tiers,og_image):
           +(f" · Value Score {sc}/100" if sc is not None else ""))
     desc_e=_hesc(desc)
     title=_hesc(f"{name} - FL Scratch-Off #{g.get('game_no','')}")
-    url=f"{SITE}/g/{no}.html"
-    hashurl=f"{SITE}/#game/{no}"
+    url=f"{SITE}/g/{no}"   # the crawlable 200 endpoint (Cloudflare serves /g/<no>.html here); self-canonical
     img=_hesc(og_image)
     return f"""<!doctype html>
 <html lang="en"><head>
@@ -516,7 +515,7 @@ def _stub_html(g,tiers,og_image):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
 <meta name="description" content="{desc_e}">
-<link rel="canonical" href="{_hesc(hashurl)}">
+<link rel="canonical" href="{_hesc(url)}">
 <meta property="og:type" content="article">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{desc_e}">
@@ -580,27 +579,24 @@ def write_stub_pages(D):
                 continue
             tiers=tiers_all.get(no) or []
             try:
-                svg=_og_svg(g,tiers)   # deterministic; also serves as the content signature
+                svg=_og_svg(g,tiers)   # deterministic string
                 svg_path=os.path.join(odir,f"{no}.svg")
                 png_path=os.path.join(odir,f"{no}.png")
                 html_path=os.path.join(gdir,f"{no}.html")
-                # content-addressed skip: the card/stub are pure functions of (g,tiers), and the
-                # SVG captures all of it. If the SVG is byte-identical to what's on disk and the
-                # outputs already exist, leave them untouched — the PNG rasterizer is NOT identical
-                # across environments (Mac vs CI Pillow), so regenerating unchanged cards would churn
-                # ~5MB every time the pushing environment alternates.
-                try: prior=open(svg_path,encoding="utf-8").read()
-                except Exception: prior=None
-                outputs_ok=os.path.exists(html_path) and (os.path.exists(png_path) if have_pil else True)
-                if prior==svg and outputs_ok:
-                    n+=1
-                    if have_pil and os.path.exists(png_path): npng+=1
-                    continue
+                # The SVG and stub-HTML are deterministic (identical bytes on any machine) so writing
+                # them every run causes NO git churn. The PNG rasterizer is NOT identical across
+                # environments (Mac vs CI Pillow), so ONLY the PNG is content-addressed: regenerate it
+                # solely when its source SVG changed (or it's missing). This keeps cards churn-free
+                # while still propagating any stub-template change (e.g. canonical/OG tags).
+                try: prior_svg=open(svg_path,encoding="utf-8").read()
+                except Exception: prior_svg=None
+                have_png=have_pil and os.path.exists(png_path)
+                if have_pil and (prior_svg!=svg or not have_png):
+                    if _svg_to_png(svg,png_path): have_png=True
                 with open(svg_path,"w",encoding="utf-8") as f:
                     f.write(svg)
-                og_rel=f"{SITE}/og/{no}.svg"
-                if have_pil and _svg_to_png(svg,png_path):
-                    og_rel=f"{SITE}/og/{no}.png"; npng+=1
+                og_rel=f"{SITE}/og/{no}.png" if have_png else f"{SITE}/og/{no}.svg"
+                if have_png: npng+=1
                 with open(html_path,"w",encoding="utf-8") as f:
                     f.write(_stub_html(g,tiers,og_rel))
                 n+=1
