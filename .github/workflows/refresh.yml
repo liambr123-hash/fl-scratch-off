@@ -27,6 +27,8 @@ jobs:
 
       - name: Rebuild data from the Florida Lottery API
         run: python3 pipeline/refresh.py
+        env:
+          PYTHONUNBUFFERED: "1"
 
       - name: Commit updated data
         run: |

@@ -129,20 +129,34 @@ def fetch_games():
     print("· fetching all games (getscratchinfo)…")
     return getj(f"{GW}/scratchgamesapp/getscratchinfo")
 
+# browser-grade headers: files.floridalottery.com rejects obvious non-browser clients
+PDF_HDR={
+    "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept":"application/pdf,application/octet-stream,*/*;q=0.8",
+    "Accept-Language":"en-US,en;q=0.9",
+    "Referer":"https://www.floridalottery.com/",
+    "Sec-Fetch-Dest":"document","Sec-Fetch-Mode":"navigate","Sec-Fetch-Site":"same-site",
+}
 def fetch_pdfs(ids):
     import concurrent.futures as cf
     os.makedirs(os.path.join(CACHE,"pdf"),exist_ok=True)
+    fails=defaultdict(int)   # error signature -> count (self-diagnosing logs)
     def one(g):
         p=os.path.join(CACHE,"pdf",f"{g}.pdf")
         try:
-            data=get(f"https://files.floridalottery.com/exptkt/{g}_WinningTicketInformation.pdf",headers={"User-Agent":HDR["User-Agent"]})
+            data=get(f"https://files.floridalottery.com/exptkt/{g}_WinningTicketInformation.pdf",headers=PDF_HDR)
             if data[:4]==b"%PDF": open(p,"wb").write(data); return g
-        except Exception: return None
-    print(f"· downloading {len(ids)} winner PDFs…")
+            fails[f"non-PDF response ({data[:40]!r})"]+=1
+        except Exception as e:
+            fails[f"{type(e).__name__}: {str(e)[:80]}"]+=1
+        return None
+    print(f"· downloading {len(ids)} winner PDFs…",flush=True)
     ok=[]
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         for r in ex.map(one,ids):
             if r: ok.append(r)
+    for sig,n in sorted(fails.items(),key=lambda x:-x[1])[:5]:
+        print(f"   PDF failures ×{n}: {sig}",flush=True)
     return ok
 
 def fetch_deadlines():
