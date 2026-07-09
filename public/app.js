@@ -228,7 +228,6 @@ function overview(){
       ${freshv.slice(0,3).map((g,i)=>tix(g,i+1,"fresh")).join("")}
       <span class="more" data-go="fresh">all fresh games ↓</span></div>
   </div>
-  <div class="panel" id="sec-avoid"><h2>Dead money — avoid <span class="hint">on sale, but the advertised top prize is already gone</span></h2><div id="avoidT"></div></div>
   <div class="panel" id="sec-wiz"><h2>Pick a ticket for me</h2>
     <div class="controls">
       <div class="seg" id="wbudget"><button data-v="0" class="active">Any $</button><button data-v="1">$1–2</button><button data-v="5">$3–5</button><button data-v="10">$10</button><button data-v="20">$20–50</button></div>
@@ -237,6 +236,7 @@ function overview(){
     <div class="podium" id="wizout"></div>
     <p class="mut" style="font-size:12px">Every scratch-off is negative expected value (best ≈ $0.80–0.92 back per $1). "Best" here means least-bad by the open <a href="about.html">Value Score formula</a> — no ticket is a good investment.</p>
   </div>
+  <div class="panel" id="sec-avoid"><h2>Dead money — avoid <span class="hint">on sale, but the advertised top prize is already gone</span></h2><div id="avoidT"></div></div>
   <div class="panel" id="sec-best"><h2>Best value — full ranking <span class="hint">on-sale games by expected payout per $1</span></h2><div id="best"></div></div>
   <div class="grid2">
     <div class="panel" id="sec-jack"><h2>Biggest jackpots still out there</h2><div id="jack"></div></div>
