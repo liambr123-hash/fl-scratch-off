@@ -84,7 +84,7 @@ function route(){
   document.querySelectorAll("nav button").forEach(b=>{b.classList.toggle("active",b.dataset.tab===tab);if(b.dataset.tab===tab)b.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"});});
   $("#nav-game").style.display=(tab==="game")?"":"none";
   clearCharts();
-  const view={overview,tickets,game,winners,retailers,maps,insights}[tab]||FLX.routes[tab]||overview;
+  const view=FLX.routes[tab]||{overview,tickets,game,winners,retailers,maps,insights}[tab]||overview;  // FLX wins: modules may override built-in sections
   view(arg);
   document.dispatchEvent(new CustomEvent("flx:view",{detail:{tab,arg}}));
   window.scrollTo(0,0);

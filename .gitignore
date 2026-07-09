@@ -3,3 +3,5 @@ lottery.db
 __pycache__/
 *.pyc
 .DS_Store
+serve.py
+public/.claude/
