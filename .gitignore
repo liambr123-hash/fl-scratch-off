@@ -5,7 +5,3 @@ __pycache__/
 .DS_Store
 serve.py
 public/.claude/
-pipeline/nightly.log
-pipeline/launchd.out.log
-pipeline/launchd.err.log
-pipeline/.nightly.lock/
