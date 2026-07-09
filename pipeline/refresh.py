@@ -169,10 +169,10 @@ def _pdf_fetch(url):
     for k in order:
         try:
             data=rungs[k]()
-            if data[:4]==b"%PDF":
+            if data[:4]==b"%PDF" and b"%%EOF" in data[-2048:]:   # complete, untruncated PDF
                 _PDF_STRATEGY[0]=k
                 return data,k
-            errs.append(f"{k}: non-PDF ({data[:30]!r})")
+            errs.append(f"{k}: {'truncated '+str(len(data))+'b (no %%EOF)' if data[:4]==b'%PDF' else 'non-PDF '+repr(data[:24])}")
         except Exception as e:
             errs.append(f"{k}: {type(e).__name__} {str(e)[:60]}")
     raise RuntimeError(" | ".join(errs))
@@ -578,20 +578,33 @@ def write_stub_pages(D):
                 continue
             tiers=tiers_all.get(no) or []
             try:
-                svg=_og_svg(g,tiers)
-                with open(os.path.join(odir,f"{no}.svg"),"w",encoding="utf-8") as f:
+                svg=_og_svg(g,tiers)   # deterministic; also serves as the content signature
+                svg_path=os.path.join(odir,f"{no}.svg")
+                png_path=os.path.join(odir,f"{no}.png")
+                html_path=os.path.join(gdir,f"{no}.html")
+                # content-addressed skip: the card/stub are pure functions of (g,tiers), and the
+                # SVG captures all of it. If the SVG is byte-identical to what's on disk and the
+                # outputs already exist, leave them untouched — the PNG rasterizer is NOT identical
+                # across environments (Mac vs CI Pillow), so regenerating unchanged cards would churn
+                # ~5MB every time the pushing environment alternates.
+                try: prior=open(svg_path,encoding="utf-8").read()
+                except Exception: prior=None
+                outputs_ok=os.path.exists(html_path) and (os.path.exists(png_path) if have_pil else True)
+                if prior==svg and outputs_ok:
+                    n+=1
+                    if have_pil and os.path.exists(png_path): npng+=1
+                    continue
+                with open(svg_path,"w",encoding="utf-8") as f:
                     f.write(svg)
                 og_rel=f"{SITE}/og/{no}.svg"
-                if have_pil:
-                    png_path=os.path.join(odir,f"{no}.png")
-                    if _svg_to_png(svg,png_path):
-                        og_rel=f"{SITE}/og/{no}.png"; npng+=1
-                with open(os.path.join(gdir,f"{no}.html"),"w",encoding="utf-8") as f:
+                if have_pil and _svg_to_png(svg,png_path):
+                    og_rel=f"{SITE}/og/{no}.png"; npng+=1
+                with open(html_path,"w",encoding="utf-8") as f:
                     f.write(_stub_html(g,tiers,og_rel))
                 n+=1
             except Exception as e:
                 print("   stub fail",no,e)
-        print(f"· wrote {n} OG stub pages"+(f" (+{npng} PNG cards)" if npng else " (SVG cards)"))
+        print(f"· wrote/verified {n} OG stub pages"+(f" ({npng} PNG cards)" if npng else " (SVG cards)"))
     except Exception as e:
         print("   write_stub_pages failed (non-fatal):",e)
 def _svg_to_png(svg,path):
