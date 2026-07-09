@@ -43,7 +43,7 @@ def ndate(s):
 def parse_pdf(path):
     import pdfplumber
     DATE=re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
-    MARK=re.compile(r"Total Number of\s+(?:\$([\d,]+(?:\.\d{2})?)\s*/?\s*(WK/LIFE)?\s+)?Top-Prize Winning Tickets:\s*([\d,]+)")
+    MARK=re.compile(r"Total Number of\s+(?:\$([\d,]+(?:\.\d{2})?)\s*/?\s*(WK/LIFE|YR/LIFE)?\s*)?Top-Prize Winning Tickets:\s*([\d,]+)")
     CITY=re.compile(r"^(.*?),\s*([A-Z]{2})\s+(\d{5})?")
     g=os.path.basename(path).split("_")[0]
     res={"game_no":g,"game_name":None,"last_queried":None,"tiers":[],"winners":[]}
@@ -100,7 +100,7 @@ def parse_pdf(path):
                 line=" ".join(w["text"] for w in ws)
                 mm=MARK.search(line)
                 if mm:
-                    amt=("$"+mm.group(1)+(" WK/LIFE" if mm.group(2) else "")) if mm.group(1) else None
+                    amt=("$"+mm.group(1)+((" "+mm.group(2)) if mm.group(2) else "")) if mm.group(1) else None
                     cur={"value":amt,"total":int(mm.group(3).replace(",","")),"claimed":0}; res["tiers"].append(cur); continue
                 if not ws: continue
                 first=ws[0]["text"]
@@ -241,6 +241,12 @@ def build_db(games_api,parses,census,geo):
         tp_total=pdf_head["total"] if pdf_head else (tiers[0]["TotalPrizes"] if tiers else None)
         tp_claim=pdf_head["claimed"] if pdf_head else (tiers[0].get("PrizesPaid") if tiers else None)
         tp_rem=(tp_total-tp_claim) if (tp_total is not None and tp_claim is not None) else (tiers[0].get("PrizesRemaining") if tiers else None)
+        if tp_rem is not None and tp_rem<0 and tiers:
+            # PDF headline total disagrees with claimed count (API over-claim) -> trust API tier-0
+            tp_total,tp_claim,tp_rem=tiers[0].get("TotalPrizes"),tiers[0].get("PrizesPaid"),tiers[0].get("PrizesRemaining")
+        if tp_total==0:
+            # all-zero headline tier = stale/garbage upstream record, not a depleted game
+            tp_total=tp_claim=tp_rem=None
         top_disp=tiers[0]["PrizeAmount"] if tiers else None
         top_val=money(top_disp)
         c.execute("INSERT INTO games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -342,7 +348,7 @@ def _value_score(g,tiers):
             if odds and odds>0 and val is not None and val>price:
                 pProfit+=1.0/odds
         tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
-        dead=bool(on and tp_rem==0)
+        dead=bool(on and tp_tot and tp_tot>0 and tp_rem is not None and tp_rem<=0)
         evN=_clamp((vpd_now-0.55)/(0.95-0.55),0,1)
         prN=_clamp((pProfit-0.03)/(0.15-0.03),0,1)
         frN=_clamp((g.get("pct_value_remaining") or 0)/100.0,0,1)
@@ -468,7 +474,7 @@ dd{{margin:2px 0 0;font-size:22px}}a{{color:#2FB6A8}}</style>
 <dt>Top prizes remaining</dt><dd>{_hesc(rem_s)}</dd>
 {f'<dt>Value Score</dt><dd>{sc}/100</dd>' if sc is not None else ''}
 </dl>
-<p style="color:#9aa4ad;font-size:14px">Independent, free Florida scratch-off statistics. Game #{no}.</p>
+<p style="color:#9aa4ad;font-size:14px">Independent, free Florida scratch-off statistics. Game #{no}.</p>\n<p style="color:#6a7c74;font-size:12px">Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida. Every scratch-off is negative expected value as designed. Play responsibly &#183; 1-888-ADMIT-IT.</p>
 </main>
 </body></html>"""
 def write_stub_pages(D):
@@ -485,6 +491,14 @@ def write_stub_pages(D):
             have_pil=True
         except Exception:
             have_pil=False
+        live={str(g.get("game_no")) for g in (D.get("games") or []) if g.get("game_no")}
+        for _dir,_exts in ((gdir,(".html",)),(odir,(".svg",".png"))):
+            try:
+                for fn in os.listdir(_dir):
+                    stem,ext=os.path.splitext(fn)
+                    if ext in _exts and stem not in live:
+                        os.remove(os.path.join(_dir,fn))
+            except Exception: pass
         n=0; npng=0
         for g in D.get("games") or []:
             no=g.get("game_no")
@@ -529,7 +543,7 @@ def _svg_to_png(svg,path):
         d.rectangle([0,0,1200,14],fill=(255,111,145))
         d.line([80,410,1120,410],fill=(42,34,48),width=2)
         def font(sz,bold=False):
-            for name in (["Georgia Bold.ttf","Arial Bold.ttf"] if bold else ["Georgia.ttf","Arial.ttf",
+            for name in (["Georgia Bold.ttf","Arial Bold.ttf","DejaVuSans-Bold.ttf"] if bold else ["Georgia.ttf","Arial.ttf",
                          "DejaVuSans.ttf"]):
                 try: return ImageFont.truetype(name,sz)
                 except Exception: continue
@@ -570,12 +584,12 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
             if r["winner_zip"] and r["winner_zip"][:5] in zipmap: pt=zipmap[r["winner_zip"][:5]]
             elif r["winner_city"]: pt=ccent.get((r["winner_city"].upper().strip(),r["winner_state"] or "FL"))
             if pt:
-                e=home[(r["winner_city"] or "?").upper()]; e["lo"].append(pt[1]); e["la"].append(pt[0]); e["n"]+=1; e["t"]=max(e["t"],t); e["mx"]=max(e["mx"],lvl or 0)
+                e=home[((r["winner_city"] or "?").upper(),(r["winner_state"] or "FL"))]; e["lo"].append(pt[1]); e["la"].append(pt[0]); e["n"]+=1; e["t"]=max(e["t"],t); e["mx"]=max(e["mx"],lvl or 0)
             if r["retailer_address"]:
                 parts=[x.strip() for x in r["retailer_address"].split(",")]; rc=parts[-1] if len(parts)>1 else None
                 rp=ccent.get((rc.upper(),"FL")) if rc else None
                 if rp: e=ret[rc.upper()]; e["lo"].append(rp[1]); e["la"].append(rp[0]); e["n"]+=1; e["t"]=max(e["t"],t); e["mx"]=max(e["mx"],lvl or 0)
-        def pack(d): return [[round(statistics.mean(e["lo"]),3),round(statistics.mean(e["la"]),3),e["n"],e["t"],city,int(e["mx"])] for city,e in d.items()]
+        def pack(d): return [[round(statistics.mean(e["lo"]),3),round(statistics.mean(e["la"]),3),e["n"],e["t"],(city[0] if isinstance(city,tuple) else city),int(e["mx"])] for city,e in d.items()]
         return pack(home),pack(ret)
     D["map_home"],D["map_ret"]=geo_rows()
     # counties
@@ -583,7 +597,7 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     for (z,) in con.execute("SELECT winner_zip FROM top_prize_winners WHERE winner_zip IS NOT NULL"):
         cc=z2c.get(z[:5]);
         if cc: cw[cc]+=1
-    norm=lambda s:s.upper().replace(".","").replace(" ","").replace("-","")
+    norm=lambda s:s.upper().replace("SAINT","ST",1).replace(".","").replace(" ","").replace("-","")
     popN={norm(k):(k,v) for k,v in POP.items()}
     TOT=sum(cw.values()); TOTP=sum(POP.values()); counties=[]
     for cc,n in cw.items():
@@ -629,7 +643,7 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     # append nightly history snapshot (compact; grows ~2KB/day)
     hpath=os.path.join(PUB,"history.json")
     try: hist=json.load(open(hpath))
-    except Exception: hist={"days":[]}
+    except FileNotFoundError: hist={"days":[]}   # corrupt JSON must crash: keeps the committed archive
     today=time.strftime("%Y-%m-%d")
     if not any(d["d"]==today for d in hist["days"]):
         snap={"d":today,"g":{}}
@@ -637,9 +651,13 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
             if g["on_sale"]:
                 snap["g"][g["game_no"]]=[g["top_prizes_remaining"],g["pct_value_remaining"],g["value_per_dollar_now"]]
         hist["days"].append(snap)
-        json.dump(hist,open(hpath,"w"),separators=(",",":"))
-    with open(os.path.join(PUB,"data.js"),"w") as f:
+        hist["days"]=hist["days"][-1095:]   # keep 3 years; extras.js fetches the whole file per visit
+        _tmp=hpath+".tmp"
+        json.dump(hist,open(_tmp,"w"),separators=(",",":")); os.replace(_tmp,hpath)
+    _dpath=os.path.join(PUB,"data.js"); _dtmp=_dpath+".tmp"
+    with open(_dtmp,"w") as f:
         f.write("const DATA="); json.dump(D,f,separators=(",",":")); f.write(";")
+    os.replace(_dtmp,_dpath)
     # per-game OG stub pages + social share cards (defensive; never breaks the build)
     write_stub_pages(D)
     return D["meta"]
@@ -655,6 +673,11 @@ def main():
         except Exception as e: print("   parse fail",gid,e)
     deadlines=fetch_deadlines()
     census=fetch_retailers()
+    # --- publish guards: a degraded upstream must NOT replace good data (nonzero exit = no CI commit) ---
+    if len(games)<50: sys.exit(f"ABORT: getscratchinfo returned only {len(games)} games")
+    total_w=sum(len(p.get("winners") or []) for p in parses.values())
+    if len(parses)<len(ids)*0.6 or total_w<400: sys.exit(f"ABORT: winner-PDF coverage collapsed ({len(parses)}/{len(ids)} PDFs, {total_w} winners)")
+    if len(census)<1000: sys.exit(f"ABORT: retailer census collapsed ({len(census)} stores)")
     zipmap,ccent,z2c=load_geonames()
     con,zipmap,ccent=build_db(games,parses,census,(zipmap,ccent,z2c))
     meta=emit(con,zipmap,ccent,z2c,fl_geo,deadlines)

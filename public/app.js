@@ -15,7 +15,8 @@ for(const g of G){
   g.profit_odds=pProfit>0?1/pProfit:null;          // 1-in-X to turn a profit
   g.p_any=g.overall_odds_1_in?1/g.overall_odds_1_in:pAnyD||null;
   g.mil_left=tiers.filter(t=>t[1]>=1e6).reduce((s,t)=>s+(t[3]||0),0);   // $1M+ prizes remaining (all tiers)
-  g.dead=!!(g.on_sale&&(g.top_prizes_remaining===0));
+  g.dead=!!(g.on_sale&&g.top_prizes_total>0&&g.top_prizes_remaining!=null&&g.top_prizes_remaining<=0);
+  if(g.top_prizes_remaining!=null&&g.top_prizes_remaining<0)g.top_prizes_remaining=0;  // display clamp (API over-claims)
   g.drift=(g.value_per_dollar_now!=null&&g.value_per_dollar_original!=null)?g.value_per_dollar_now-g.value_per_dollar_original:null;
   // Value Score 0-100 (open formula): 45% current EV, 20% profit-odds, 20% freshness, 15% jackpot health
   if(g.value_per_dollar_now!=null&&g.on_sale){
@@ -70,7 +71,7 @@ window.FLX={routes:{},gameExtras:[],ready:[],
 
 /* ---------- charts registry ---------- */
 let charts=[];
-function newChart(el,cfg){if(!el)return null;const c=new Chart(el,cfg);charts.push(c);return c;}
+function newChart(el,cfg){if(!el||typeof Chart==="undefined")return null;const c=new Chart(el,cfg);charts.push(c);return c;}
 function clearCharts(){charts.forEach(c=>c.destroy());charts=[];}
 const gridC="rgba(128,128,128,.15)", tickC=getComputedStyle(document.body).color;
 Chart.defaults.color=tickC; Chart.defaults.borderColor=gridC;
@@ -84,7 +85,8 @@ function route(){
   document.querySelectorAll("nav button").forEach(b=>{b.classList.toggle("active",b.dataset.tab===tab);if(b.dataset.tab===tab)b.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"});});
   $("#nav-game").style.display=(tab==="game")?"":"none";
   clearCharts();
-  const view=FLX.routes[tab]||{overview,tickets,game,winners,retailers,maps,insights}[tab]||overview;  // FLX wins: modules may override built-in sections
+  const builtins={overview,tickets,game,winners,retailers,maps,insights};
+  const view=(Object.hasOwn(FLX.routes,tab)?FLX.routes[tab]:undefined)||(Object.hasOwn(builtins,tab)?builtins[tab]:undefined)||overview;  // FLX wins; hasOwn blocks prototype keys
   view(arg);
   document.dispatchEvent(new CustomEvent("flx:view",{detail:{tab,arg}}));
   window.scrollTo(0,0);
@@ -201,7 +203,7 @@ function overview(){
   const recent=[...W].filter(w=>w[1]).sort((a,b)=>b[1].localeCompare(a[1])).slice(0,10);
   const tickItems=[
     ...recent.slice(0,6).map(w=>`<span class="ti" data-g="${w[0]}">${money(w[6])} claimed · ${esc(w[3]||"FL")} · ${esc(GAME_NAME[w[0]]||"")}</span>`),
-    `<span class="ti">${G.filter(g=>g.on_sale&&g.top_prize_value_num>=25e6&&g.top_prizes_remaining>0).reduce((s,g)=>s+g.top_prizes_remaining,0)} × $25M jackpots still unclaimed</span>`,
+    ...(()=>{const bigs=G.filter(g=>g.on_sale&&g.top_prize_value_num>=5e6&&g.top_prizes_remaining>0);const cnt=bigs.reduce((s,g)=>s+g.top_prizes_remaining,0);return cnt?[`<span class="ti">${cnt} × ${money(Math.max(...bigs.map(g=>g.top_prize_value_num)))}-class jackpots still unclaimed</span>`]:[];})(),
     ...(posEV.length?[`<span class="ti" data-g="${posEV[0].game_no}">${esc(posEV[0].game_name)} is positive-EV (${f2(posEV[0].value_per_dollar_now)}/$)</span>`]:[])
   ].join('<span class="tsep">◆</span>');
   mainEl.innerHTML=`
@@ -234,7 +236,7 @@ function overview(){
       <div class="seg" id="wgoal"><button data-v="value" class="active">Best value</button><button data-v="dream">Dream big</button><button data-v="often">Win something</button></div>
     </div>
     <div class="podium" id="wizout"></div>
-    <p class="mut" style="font-size:12px">Every scratch-off is negative expected value (best ≈ $0.80–0.92 back per $1). "Best" here means least-bad by the open <a href="about.html">Value Score formula</a> — no ticket is a good investment.</p>
+    <p class="mut" style="font-size:12px">Every scratch-off is negative expected value as designed (rare nearly-sold-out games can briefly turn positive — we flag those above). "Best" here means least-bad by the open <a href="about.html">Value Score formula</a> — no ticket is a good investment.</p>
   </div>
   <div class="panel" id="sec-avoid"><h2>Dead money — avoid <span class="hint">on sale, but the advertised top prize is already gone</span></h2><div id="avoidT"></div></div>
   <div class="panel" id="sec-best"><h2>Best value — full ranking <span class="hint">on-sale games by expected payout per $1</span></h2><div id="best"></div></div>
@@ -527,7 +529,7 @@ function maps(){
 function insights(){
   mainEl.innerHTML=`
   <div class="panel insight"><h2>How to read this</h2>
-    <p class="mut" style="font-size:13.5px">Every scratch-off is negative-EV — the best games return ~$0.80–0.92 per $1. <b>Which game</b> you pick matters far more than which price tier: payout is ~75% at every price point. The jackpot is marketing: it holds only 4–8% of a game's prize value. Cash-option payouts are ~63% of advertised face for big prizes.</p></div>
+    <p class="mut" style="font-size:13.5px">Every scratch-off is negative-EV as designed — rare nearly-sold-out games can briefly turn positive on remaining tickets. <b>Which game</b> you pick matters far more than which price tier: payout is ~75% at every price point. The jackpot is marketing: it typically holds under a tenth of a game's prize value. Cash-option payouts run roughly 60–65% of advertised face for big prizes.</p></div>
   <div class="grid2">
     <div class="panel"><h2>EV vs price <span class="hint">every on-sale game</span></h2><div class="chartbox"><canvas id="scat"></canvas></div></div>
     <div class="panel"><h2>Design payout by price tier</h2><div class="chartbox"><canvas id="payp"></canvas></div></div>

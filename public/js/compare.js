@@ -160,6 +160,8 @@
     function apply(){
       var ids=[];
       sels.forEach(function(sel){ if(sel.value&&ids.indexOf(sel.value)<0)ids.push(sel.value); });
+      if(!ids.length){ try{ saveSet([]); }catch(_){}
+        if(location.hash==="#compare"||location.hash==="#compare/"){ FLX.routes.compare(""); return; } }
       go("compare",ids.join(","));
     }
     sels.forEach(function(sel){ sel.onchange=apply; });

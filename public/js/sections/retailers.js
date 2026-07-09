@@ -205,7 +205,7 @@ function rtDoubles(R,stores){
         <div class="rt-dblhead" title="${esc(s.addr)}">${esc(s.name)}${s.city?` <span class="dim">· ${esc(s.city)}</span>`:""}</div>
         <div class="rt-pills">${s.wins.map(rtPill).join("")}</div>
       </div>`).join("")}</div>
-    <p class="mut" style="font-size:12px;margin-top:10px">Caveats: store identity is matched on name + address strings — the lottery's own dedup counts 752 stores and 10 doubles — and the ~${Math.round(expDbl)} assumes every store sells equal volume, so the real expectation is higher. The excess is volume, not magic.</p>`;
+    <p class="mut" style="font-size:12px;margin-top:10px">Caveats: store identity is matched on name + address strings — the lottery's own dedup counted 752 stores and 10 doubles as of mid-2026 — and the ~${Math.round(expDbl)} assumes every store sells equal volume, so the real expectation is higher. The excess is volume, not magic.</p>`;
   body.onclick=e=>{const p=e.target.closest("[data-g]");if(p)go("game",p.dataset.g);};
 }
 

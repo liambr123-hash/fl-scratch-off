@@ -186,7 +186,7 @@
         const medClass  = res.medianNet>=0 ? "good" : "bad";
         const evPerTicket = res.meanWinPerTicket; // avg prize value returned per $ ticket
         const topLine = d.topVal>0
-          ? `Chance of hitting the top prize (${esc(g.top_prize_display||money(d.topVal))}) at least once across your ${num(N)} tickets: <b>${fmtTiny(res.pTopAtLeastOne)}</b>.`
+          ? `Chance of hitting the biggest remaining prize (${money(d.topVal)}) at least once across your ${num(N)} tickets: <b>${fmtTiny(res.pTopAtLeastOne)}</b>.`
           : `There are no top prizes left in this game, so a stack this size can't hit one.`;
 
         outEl.innerHTML = `

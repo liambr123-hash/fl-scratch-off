@@ -38,13 +38,13 @@
   <ul>
     <li><b>Games, odds &amp; prizes remaining</b> — the Florida Lottery's own public game data feed, refreshed nightly. Every prize tier's odds, total, remaining, and paid counts are theirs, unmodified.</li>
     <li><b>Winners</b> — the Florida Lottery's public "Top-Prize Winners with Retailer Information" reports, parsed automatically. Recent winners of $250,000+ may show as <em>anonymous</em> for 90 days under Florida Statute 24.1051, then their names appear.</li>
-    <li><b>Retailers</b> — the Florida Lottery's public store locator, sampled statewide (13,500+ locations).</li>
+    <li><b>Retailers</b> — the Florida Lottery's public store locator, sampled statewide (13,000+ locations).</li>
     <li><b>Home/store locations</b> — mapped to city/ZIP centroids (GeoNames); county populations are U.S. Census estimates.</li>
   </ul>
 
   <h2>How the analysis works</h2>
   <ul>
-    <li><b>Expected value (EV/$)</b> is the average payout per $1 for a random <em>remaining</em> ticket. Every game is negative-EV; the best sit around $0.80–0.92. Figures use advertised <em>face</em> values — most jackpot winners take the ~63% cash option, so real returns run lower.</li>
+    <li><b>Expected value (EV/$)</b> is the average payout per $1 for a random <em>remaining</em> ticket. Every game is negative-EV as designed; the best typically sit around $0.80–0.92, and a nearly sold-out game can briefly turn positive on its remaining tickets — we flag those. Figures use advertised <em>face</em> values — most jackpot winners take the cash option at roughly 60–65% of face, so real returns run lower.</li>
     <li><b>Estimated tickets</b> are inferred from each tier's <code>odds × prize count</code> (robust to missing tiers). Games with decommissioned/degenerate odds tables are shown without EV.</li>
     <li><b>Retailer "lift"</b> is winners ÷ that chain's actual store count, versus the statewide average. It's a sales-volume proxy, <em>not</em> luck — every ticket is independent and random. No store or town is "due."</li>
   </ul>
@@ -53,9 +53,9 @@
   <p>Each on-sale game gets a 0–100 score — unlike other sites, the math is public:</p>
   <ul>
     <li><b>45%</b> — current expected value per $1 (scaled 0.55→0.95)</li>
-    <li><b>20%</b> — "profit odds": the chance one ticket pays back more than it cost (design odds, tiers above ticket price)</li>
+    <li><b>20%</b> — "profit odds": the chance one ticket pays back more than it cost (design odds, tiers above ticket price; scaled 3%→15%)</li>
     <li><b>20%</b> — freshness: % of total prize value still unclaimed</li>
-    <li><b>15%</b> — jackpot health: share of advertised top prizes still out there (zero if none — those games are capped at "Avoid")</li>
+    <li><b>15%</b> — jackpot health: a 0.5 baseline plus 0.5 × the share of advertised top prizes still out there; zero when none remain (those games are capped at "Avoid")</li>
   </ul>
   <p>Bands: 70+ Excellent · 55–69 Good · 40–54 Fair · under 40 Avoid. The score ranks <em>relative</em> value only — every scratch-off remains negative expected value.</p>
 

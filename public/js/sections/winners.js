@@ -98,6 +98,30 @@ FLX.routes.winners=function(){
   try{for(const w of W){if(/CASH/i.test(w[7]||""))cashN++;else if(/ANNUAL/i.test(w[7]||""))annN++;}}catch(e){}
   const recN=cashN+annN;
   const cashPct=recN?Math.round(100*cashN/recN):null;
+  /* live cash-ratio stats for the hero card + caveat (same filter as the scatter) */
+  const HR={n:0,latest:null,m1:null,m25:null,firstN:null};
+  try{
+    const rows=[];
+    for(const w of W){
+      if(!(w[6]>=1e6)||!/CASH/i.test(w[7]||""))continue;
+      const pay=parseFloat(String(w[8]||"").replace(/[^\d.]/g,""));
+      if(!pay||pay<=0)continue;
+      const ratio=pay/w[6];
+      if(ratio>1.2)continue;
+      rows.push({y:(w[1]||"").slice(0,4),ratio,adv:w[6]});
+    }
+    HR.n=rows.length;
+    const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+    const years=[...new Set(rows.map(r=>r.y))].sort();
+    if(years.length){
+      const latestRows=rows.filter(r=>r.y===years[years.length-1]);
+      HR.latest=mean(latestRows.map(r=>r.ratio));
+      HR.firstY=years[0];
+      HR.firstN=rows.filter(r=>r.y===years[0]).length;
+    }
+    HR.m1=mean(rows.filter(r=>r.adv<2e6).map(r=>r.ratio));
+    HR.m25=mean(rows.filter(r=>r.adv>=25e6).map(r=>r.ratio));
+  }catch(e){}
 
   /* prize-size correction line (survivor of the cut ladder chart) */
   let sizeLine="";
@@ -134,7 +158,7 @@ FLX.routes.winners=function(){
     <h2>The shrinking million <span class="hint">what $1M+ winners actually banked, as a share of the advertised prize</span></h2>
     <div class="cards" style="margin-bottom:14px">
       <div class="card"><div class="lab">Take the cash</div><div class="val">${cashPct==null?"—":cashPct+"%"}</div><div class="note">${num(cashN)} of ${num(recN)} recorded payment choices</div></div>
-      <div class="card"><div class="lab">A $1,000,000 win now pays</div><div class="val">≈ $620–640k</div><div class="note">cash option, before tax</div></div>
+      <div class="card"><div class="lab">A $1,000,000 win now pays</div><div class="val">${HR.latest?"≈ "+money(1e6*HR.latest):"—"}</div><div class="note">cash option, before tax — latest-year mean</div></div>
       <div class="card"><div class="lab">Ever chose the annuity</div><div class="val">${num(annN)}</div><div class="note">every other recorded winner took the discounted cash</div></div>
     </div>
     <div class="controls">
@@ -142,7 +166,7 @@ FLX.routes.winners=function(){
       <span class="legend" style="margin:0">${BUCKET.map(b=>`<span><span class="sw" style="background:${b.c}"></span>${b.label}</span>`).join("")}<span><span class="wline"></span>year mean</span></span>
     </div>
     <div class="chartbox" id="w-heroBox"><canvas id="w-heroC"></canvas></div>
-    <p class="wcave">The cash option is the present value of a ~30-year annuity, so the falling line tracks interest rates and annuity design — not the Lottery getting stingier. Bigger prizes carry longer annuities ($25M claims average ≈61% of face vs ≈64% for $1M). Payouts have been published only since ~2022 (419 of 815 winners here have one on record), the 2022 mean rests on just 6 claims, and every figure is pre-tax. Click a dot for its game; picking a bucket also filters the table below.</p>
+    <p class="wcave">The cash option is the present value of a ~30-year annuity, so the falling line tracks interest rates and annuity design — not the Lottery getting stingier. Bigger prizes carry longer annuities${HR.m25&&HR.m1?` ($25M claims average ≈${Math.round(100*HR.m25)}% of face vs ≈${Math.round(100*HR.m1)}% for $1M)`:``}. Payouts have been published only since ~${HR.firstY||"2022"} (${num(HR.n)} of ${num(W.length)} winners here have one on record)${HR.firstN?`, the ${HR.firstY} mean rests on just ${HR.firstN} claims`:``}, and every figure is pre-tax. Click a dot for its game; picking a bucket also filters the table below.</p>
   </div>
 
   <div class="panel" id="w-strip">
@@ -376,7 +400,8 @@ FLX.routes.winners=function(){
     takeaway(d0);
     const cave=$("#w-stripcave");
     if(cave)cave.textContent=`Survivorship censoring: only claimed prizes can plot here — jackpots still unclaimed in live games don't appear, so true survival runs longer than these dots suggest. The claim date can lag the actual scratch by up to 90+ days. The $3 band is small (n=${d0.n3}) and skewed by its launch calendar.`;
-    const dayTicks=isM?[0,90,365,730,1460]:[0,30,90,180,365,730,1095,1460,1825];
+    const maxD=Math.max(1830,...W.map(w=>{const g=byNo[w[0]];return g&&g.launch_date&&w[1]?(new Date(w[1])-new Date(g.launch_date))/864e5:0;}));
+    const dayTicks=(isM?[0,90,365,730,1460]:[0,30,90,180,365,730,1095,1460,1825]).concat([2190,2555,2920,3285].filter(v=>v<=maxD));
     const stripChart=newChart($("#w-stripC"),{type:"scatter",data:{datasets:[
       {data:d0.meds,pointStyle:"rectRot",pointRadius:isM?6:7.5,pointHoverRadius:9,
         backgroundColor:"#FF6F91",borderColor:"rgba(0,0,0,.35)",borderWidth:1},
@@ -397,7 +422,7 @@ FLX.routes.winners=function(){
             return [` ${GAME_NAME[w[0]]||""} — ${w[5]||money(w[6])}`,` claimed ${Math.round(c.raw.d)} days after launch`];
           }}}},
       scales:{
-        x:{type:"linear",min:0,max:Math.sqrt(1830),title:{display:!isM,text:"days from launch to claim (√ scale)"},
+        x:{type:"linear",min:0,max:Math.sqrt(maxD*1.05),title:{display:!isM,text:"days from launch to claim (√ scale)"},
           afterBuildTicks:ax=>{ax.ticks=dayTicks.map(v=>({value:Math.sqrt(v)}));},
           ticks:{callback:v=>{const d=Math.round(v*v);return d===0?"launch":d>=365?Math.round(d/365)+"y":d+"d";},font:{size:isM?10:11},maxRotation:0}},
         y:{min:-0.7,max:7.7,grid:{display:false},

@@ -37,9 +37,10 @@
       #flx-cheat .cs-avoid{color:var(--bad)}
 
       @media print{
-        /* hide the entire live app, show only the cheat-sheet */
-        body>header,body>footer,#main,.ticker{display:none !important}
-        #flx-cheat{display:block !important;color:#000;background:#fff;
+        /* only when printing via the cheat-sheet button (body.flx-printing) —
+           a plain Cmd/Ctrl+P prints the page normally */
+        body.flx-printing>header,body.flx-printing>footer,body.flx-printing #main,body.flx-printing .ticker{display:none !important}
+        body.flx-printing #flx-cheat{display:block !important;color:#000;background:#fff;
           max-width:100%;margin:0;padding:0;font-family:var(--sans)}
         #flx-cheat h1,#flx-cheat h2{color:#000}
         #flx-cheat h2{border-bottom:1px solid #999}
@@ -125,7 +126,9 @@
     function doPrint(){
       let host=null;
       try{ host=buildSheet(); }catch(e){ return; }
+      document.body.classList.add("flx-printing");
       const cleanup=()=>{ try{ host&&host.remove(); }catch(_){}
+        document.body.classList.remove("flx-printing");
         window.removeEventListener("afterprint",cleanup); };
       window.addEventListener("afterprint",cleanup);
       // belt-and-suspenders: remove even if afterprint never fires
@@ -194,6 +197,16 @@
               // sort oldest->newest by date string (sortable YYYY-MM-DD)
               days.sort(function(a,b){ return String(a&&a.d).localeCompare(String(b&&b.d)); });
               DAYS=days;
+              // direct-load race: if a game page rendered before this fetch resolved,
+              // its trend line shows the placeholder — re-render it now.
+              try{
+                var mHash=location.hash.match(/^#game\/(.+)$/);
+                if(mHash&&typeof byNo!=="undefined"&&byNo[mHash[1]]){
+                  var old=document.querySelector(".flx-trend");
+                  if(old) old.remove();
+                  render(byNo[mHash[1]]);
+                }
+              }catch(_){}
             }catch(_){ DAYS=null; }
           }).catch(function(){ DAYS=null; });
         }catch(_){ DAYS=null; }

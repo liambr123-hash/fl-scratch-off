@@ -155,6 +155,7 @@ footer .disc{color:var(--muted);font-weight:500}
 
 /* ---------- committee batch: badges, ticker, deadlines, wizard ---------- */
 :root{--teal2:#8FD9D2}
+@media (prefers-color-scheme: light){.scoreb.teal2{color:#177f72;background:rgba(47,182,168,.16)}}
 .teal2{color:var(--aqua)}
 .scoreb{display:inline-block;min-width:30px;text-align:center;padding:1px 7px;border-radius:7px;font-weight:700;font-size:12.5px;font-family:var(--sans)}
 .scoreb.good{background:rgba(47,182,168,.18);color:var(--teal)}

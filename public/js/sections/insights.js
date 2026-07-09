@@ -120,11 +120,11 @@ function render(){
 
   <div class="panel insight"><h2>How to read this</h2>
     <p class="mut" style="font-size:13.5px;line-height:1.6">
-      Every scratch-off is negative-EV — the best return ≈ $0.80–0.92 per $1 — and price tiers average out the same,
+      Every scratch-off is negative-EV as designed — though a nearly sold-out game can briefly turn positive on its remaining tickets (we flag those on the Overview) — and price tiers average out the same,
       so <b class="ins-anchor" data-anchor="ins-strip">which game you pick matters far more than what it costs</b>.
       Even a "win" usually isn't one: at most prices, a third to half of winning tickets pay back
       <b class="ins-anchor" data-anchor="ins-ladder">the ticket price or less</b>.
-      And the jackpot is marketing — it holds only 4–8% of a game's prize value, though
+      And the jackpot is marketing — it typically holds under a tenth of a game's prize value, though
       <b class="ins-anchor" data-anchor="ins-dream">your live odds on it drift far from the printed odds</b>.
       <span class="ins-xlink">The advertised million isn't the check, either — the cash-option haircut is measured
       winner-by-winner on the <b class="ins-anchor" data-golink="winners">Winners tab →</b></span>
@@ -132,7 +132,7 @@ function render(){
   </div>
 
   <div class="panel" id="ins-ladder"><h2>What a "win" actually is <span class="hint">design odds decomposed — money-back is not a win</span></h2>
-    <p class="ins-lede">The chance of winning <b>anything</b> climbs from ~21% on a $1 ticket to ~36% at $30 — but a big slice of
+    <p class="ins-lede">The chance of winning <b>anything</b> climbs from ~${Math.round((lad[0]&&lad[0].any)||21)}% on a $${(lad[0]&&lad[0].p)||1} ticket to ~${Math.round((lad[lad.length-1]&&lad[lad.length-1].any)||36)}% at $${(lad[lad.length-1]&&lad[lad.length-1].p)||30} — but a big slice of
       those "wins" only hands back your ticket price. Each bar averages the printed odds tables of every on-sale game at that price.</p>
     <div class="controls">
       <div class="seg" id="ins-ladderSeg"><button data-v="all" class="active">of all tickets</button><button data-v="wins">of winning tickets</button></div>
@@ -171,7 +171,7 @@ function render(){
 
   <div class="panel" id="ins-dream"><h2>The jackpot dream tracker <span class="hint">live top-prize odds vs how the game was designed</span></h2>
     <p class="ins-lede"><b>Below the dashed line, your shot at the jackpot is now better than the printed odds</b> — fewer tickets stand
-      between the remaining top prizes. Worth knowing, and worth deflating: the jackpot tier holds only 4–8% of a game's prize pool.
+      between the remaining top prizes. Worth knowing, and worth deflating: the jackpot tier typically holds under a tenth of a game's prize pool.
       It is the marketing, not the product.</p>
     <div class="legend">
       <span><span class="sw" style="background:var(--teal)"></span>≥1.15× better than design</span>
@@ -202,8 +202,8 @@ function render(){
       <div><div class="ins-h3">by calendar month, all years pooled</div><div class="chartbox ins-short"><canvas id="ins-monC"></canvas></div></div>
     </div>
     <p class="ins-cav">Claim date ≠ scratch date — winners can sit on a ticket for 90+ days. The January peak (the two busiest days on
-      record are Jan 20 and Jan 2) partly reflects the launch calendar — flagship $50 games launch in late winter — plus holiday
-      backlogs; and ~57 uneven months are pooled here.</p>
+      record are both in January) partly reflects the launch calendar — flagship $50 games launch in late winter — plus holiday
+      backlogs; and the pooled months are uneven in count.</p>
   </div>
 
   <div class="panel" id="ins-anon"><h2>The anonymity era <span class="hint">F.S. 24.1051 — 90-day identity shield for $250k+ winners, from Apr 2026</span></h2>
@@ -215,7 +215,7 @@ function render(){
     </div>
     <p class="ins-cav">The shield is temporary — it lasts 90 days, so the newest anonymous winners may become named later
       (recent bars are right-censored, and the latest month is partial). Eligibility starts at $250k, so much of the under-$1M bucket
-      simply can't opt in. And the $5M+ bar is a sample of 8 — read it loosely.</p>
+      simply can't opt in. And the $5M+ bar is a sample of ${W.filter(w=>(w[1]||"")>="2026-04"&&(w[6]||0)>=5e6).length} — read it loosely.</p>
   </div>
 
   </div>`;
