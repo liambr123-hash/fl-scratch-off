@@ -22,6 +22,14 @@ body{background:var(--bg);color:var(--text);font:15px/1.55 var(--sans);padding-b
 a{color:var(--teal);text-decoration:none}
 header{padding:20px 28px 0;max-width:1300px;margin:0 auto}
 .brand{display:flex;align-items:center;gap:13px}
+.tipjar{margin-left:auto;display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;font-weight:600;
+  white-space:nowrap;padding:5px 11px 5px 8px;border:1px solid var(--border);border-radius:22px;background:var(--panel);
+  transition:color .15s,border-color .15s,transform .15s,box-shadow .15s}
+.tipjar:hover{color:var(--flamingo);border-color:var(--flamingo);transform:translateY(-1px);box-shadow:0 4px 14px rgba(255,111,145,.16)}
+.tipjar .jar{flex:none;transition:transform .2s}
+.tipjar:hover .jar{transform:translateY(-1px) rotate(-4deg)}
+.tipjar:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+@media(max-width:600px){.tipjar span{display:none}.tipjar{padding:5px 6px;gap:0}}
 .brand svg{flex:none}
 .brand h1{font-family:var(--serif);font-size:25px;font-weight:600;letter-spacing:-.01em;line-height:1.05}
 .brand h1 em{font-style:italic;color:var(--flamingo);font-weight:500}
