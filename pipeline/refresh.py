@@ -135,28 +135,84 @@ PDF_HDR={
     "Accept":"application/pdf,application/octet-stream,*/*;q=0.8",
     "Accept-Language":"en-US,en;q=0.9",
     "Referer":"https://www.floridalottery.com/",
-    "Sec-Fetch-Dest":"document","Sec-Fetch-Mode":"navigate","Sec-Fetch-Site":"same-site",
 }
+PDFCACHE=os.path.join(ROOT,"pipeline","pdfcache")   # committed fallback: last-known-good PDFs
+_PDF_STRATEGY=[None]  # remember the first rung that works and lead with it
+
+def _pdf_fetch(url):
+    """Escalation ladder: the CDN TLS-fingerprints clients (CI gets SSLV3_ALERT_HANDSHAKE_FAILURE),
+       so try three different TLS stacks before giving up."""
+    def s1():  # stock urllib
+        return get(url,headers=PDF_HDR,tries=1,timeout=30)
+    def s2():  # TLS1.2 with a browser-ish cipher order
+        import ssl
+        ctx=ssl.create_default_context()
+        ctx.minimum_version=ssl.TLSVersion.TLSv1_2
+        ctx.maximum_version=ssl.TLSVersion.TLSv1_2
+        ctx.set_ciphers("ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+                        "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+                        "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305")
+        req=urllib.request.Request(url,headers=PDF_HDR)
+        with urllib.request.urlopen(req,timeout=30,context=ctx) as r: return r.read()
+    def s3():  # curl: an entirely different TLS stack/fingerprint
+        import subprocess
+        r=subprocess.run(["curl","-sS","--fail","-L","--max-time","40",
+                          "-A",PDF_HDR["User-Agent"],
+                          "-H","Accept: application/pdf",
+                          "-H","Referer: https://www.floridalottery.com/",url],
+                         capture_output=True,timeout=50)
+        if r.returncode==0: return r.stdout
+        raise RuntimeError(f"curl rc={r.returncode} {r.stderr[:70].decode(errors='replace')}")
+    rungs={"urllib":s1,"tls12":s2,"curl":s3}
+    order=([_PDF_STRATEGY[0]] if _PDF_STRATEGY[0] else [])+[k for k in rungs if k!=_PDF_STRATEGY[0]]
+    errs=[]
+    for k in order:
+        try:
+            data=rungs[k]()
+            if data[:4]==b"%PDF":
+                _PDF_STRATEGY[0]=k
+                return data,k
+            errs.append(f"{k}: non-PDF ({data[:30]!r})")
+        except Exception as e:
+            errs.append(f"{k}: {type(e).__name__} {str(e)[:60]}")
+    raise RuntimeError(" | ".join(errs))
+
 def fetch_pdfs(ids):
-    import concurrent.futures as cf
+    import concurrent.futures as cf, shutil
     os.makedirs(os.path.join(CACHE,"pdf"),exist_ok=True)
-    fails=defaultdict(int)   # error signature -> count (self-diagnosing logs)
+    os.makedirs(PDFCACHE,exist_ok=True)
+    fails=defaultdict(int); cached=[]
+    if os.environ.get("FLSS_SIMULATE_PDF_FAIL"):   # test hook: force the cache-fallback path
+        globals()["_pdf_fetch"]=lambda url:(_ for _ in ()).throw(RuntimeError("simulated outage"))
     def one(g):
         p=os.path.join(CACHE,"pdf",f"{g}.pdf")
         try:
-            data=get(f"https://files.floridalottery.com/exptkt/{g}_WinningTicketInformation.pdf",headers=PDF_HDR)
-            if data[:4]==b"%PDF": open(p,"wb").write(data); return g
-            fails[f"non-PDF response ({data[:40]!r})"]+=1
+            data,rung=_pdf_fetch(f"https://files.floridalottery.com/exptkt/{g}_WinningTicketInformation.pdf")
+            open(p,"wb").write(data)
+            cp=os.path.join(PDFCACHE,f"{g}.pdf")   # refresh committed cache only on real change (no churn)
+            try:
+                if not(os.path.exists(cp) and open(cp,"rb").read()==data): open(cp,"wb").write(data)
+            except Exception: pass
+            return g
         except Exception as e:
-            fails[f"{type(e).__name__}: {str(e)[:80]}"]+=1
-        return None
+            fails[str(e)[:120]]+=1
+            cp=os.path.join(PDFCACHE,f"{g}.pdf")   # fall back to last-known-good
+            if os.path.exists(cp):
+                try:
+                    shutil.copyfile(cp,p); cached.append(g); return g
+                except Exception: pass
+            return None
     print(f"· downloading {len(ids)} winner PDFs…",flush=True)
     ok=[]
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         for r in ex.map(one,ids):
             if r: ok.append(r)
-    for sig,n in sorted(fails.items(),key=lambda x:-x[1])[:5]:
+    for sig,n in sorted(fails.items(),key=lambda x:-x[1])[:3]:
         print(f"   PDF failures ×{n}: {sig}",flush=True)
+    if cached:
+        print(f"! PDF source unreachable for {len(cached)} games — using committed last-known-good PDFs (winners may lag until the next successful full fetch)",flush=True)
+    if _PDF_STRATEGY[0] and not cached:
+        print(f"   (fetched live via {_PDF_STRATEGY[0]})",flush=True)
     return ok
 
 def fetch_deadlines():
