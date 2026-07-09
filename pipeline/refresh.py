@@ -507,6 +507,7 @@ _PAGE_CSS=("body{margin:0;background:#0f1e1c;color:#ece8dd;font-family:-apple-sy
  "footer{max-width:860px;margin:0 auto;padding:16px 22px 46px;color:#6a7c74;font-size:12px;line-height:1.6;border-top:1px solid #2b423c}")
 
 _ALL_PRICES=[]
+_DUP_KEYS=set()   # (name_lower, price_int) that appear on >1 game -> disambiguate stub titles
 
 def _pricebar(prices):
     if not prices: return ""
@@ -541,12 +542,14 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
     tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
     rem_s=("{:,}".format(tp_rem) if tp_rem is not None else "?")+((" of {:,}".format(tp_tot)) if tp_tot else "")
     sc=_value_score(g,tiers)
-    lq=(g.get("last_queried") or "")[:10].strip()
+    lq=ndate(g.get("last_queried")) or (g.get("last_queried") or "")[:10].strip()   # ISO, matches landing pages
     launch=(g.get("launch_date") or "")[:10]; redeem=(g.get("redemption_date") or "")[:10]
+    _dup=(name.strip().lower(),(int(price) if price is not None else None)) in _DUP_KEYS
+    _idn=f" (Game #{no})" if _dup else ""   # distinguish same-name reissues so titles/H1 aren't duplicate
     if len(name)<=34:
-        title=_hesc(f"{name} Florida Scratch-Off Odds & Prizes Remaining ({price_s})")
+        title=_hesc(f"{name}{_idn} Florida Scratch-Off Odds & Prizes Remaining ({price_s})")
     else:
-        title=_hesc(f"{name} — FL Scratch-Off Odds & Prizes Left")
+        title=_hesc(f"{name}{_idn} — FL Scratch-Off Odds & Prizes Left")
     desc=(f"{name}: {price_s} Florida scratch-off — {rem_s} top prizes left, EV {ev_s}"
           +(f", Value Score {sc}/100" if sc is not None else "")+f". Updated {lq}. Not affiliated with the Florida Lottery.")
     desc_e=_hesc(desc)
@@ -611,7 +614,7 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
 </head><body>
 <main>
 <p class="muted"><a href="/">Florida Scratch-Off Statistician</a> &rsaquo; <a href="/best-value">Best value</a> &rsaquo; {name_e}</p>
-<h1>{name_e} &#8212; Florida Scratch-Off</h1>
+<h1>{name_e}{_idn} &#8212; Florida Scratch-Off</h1>
 {lead}
 <p><a class="cta" href="/#game/{no}">Open the interactive version with charts &amp; winners &#8594;</a></p>
 {tier_table}
@@ -709,7 +712,7 @@ def write_landing_pages(D):
                '<p class="muted">Value Score (0&#8211;100) blends current expected value, profit odds, freshness, and jackpot health. Every scratch-off is negative expected value &#8212; the best games return about $0.80&#8211;0.92 per $1, so &ldquo;best value&rdquo; means least-bad, never profitable. Play responsibly.</p>'
                +(f'<p><b>Top 10 right now:</b> {top10}.</p>' if top10 else ""))
         write("/best-value",_landing_html("Best-Value Florida Scratch-Off Tickets to Buy (2026) — Ranked",
-            f"Every active Florida scratch-off ranked by expected value and prizes remaining, updated {built}. Independent live stats. Every scratch-off is negative EV — play responsibly.",
+            f"Florida scratch-offs ranked by expected value and top prizes remaining — find the best value right now. Independent, ad-free, updated {built}.",
             "/best-value","Best-Value Florida Scratch-Offs Right Now",intro,tbl(bv,cols,head),prices,
             itemlist=[(g["game_no"],g["game_name"]) for g in bv[:25]]))
 
@@ -769,8 +772,13 @@ def write_stub_pages(D):
                     if ext in _exts and stem not in live:
                         os.remove(os.path.join(_dir,fn))
             except Exception: pass
-        global _ALL_PRICES
+        global _ALL_PRICES,_DUP_KEYS
         _ALL_PRICES=sorted({int(g['ticket_price']) for g in (D.get('games') or []) if g.get('ticket_price')})
+        _seen={}
+        for _g in (D.get('games') or []):
+            _k=((_g.get('game_name') or '').strip().lower(), int(_g['ticket_price']) if _g.get('ticket_price') else None)
+            _seen[_k]=_seen.get(_k,0)+1
+        _DUP_KEYS={k for k,c in _seen.items() if c>1}
         n=0; npng=0; sitemap=[]
         for g in D.get("games") or []:
             no=g.get("game_no")
