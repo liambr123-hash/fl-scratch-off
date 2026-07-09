@@ -178,7 +178,7 @@ function render(){
     if(!DATA.fl||!window.d3){document.getElementById("map").innerHTML='<p class="mut">Map data unavailable — the county and distance analyses below still work.</p>';return;}
     const wrapEl=document.getElementById("map-wrap"), tip=document.getElementById("tip");
     const Wd=760,Hd=620;
-    const svg=d3.select("#map").append("svg").attr("viewBox",`0 0 ${Wd} ${Hd}`).attr("width","100%");
+    const svg=d3.select("#map").append("svg").attr("viewBox",`0 0 ${Wd} ${Hd}`).attr("width","100%").attr("role","img").attr("aria-label","Map of Florida showing top-prize winner locations by city; a data table with the same figures appears in the Winners tab");
     const proj=d3.geoMercator().fitExtent([[14,14],[Wd-14,Hd-14]],DATA.fl);
     const dark=matchMedia("(prefers-color-scheme: dark)").matches;
     svg.append("path").datum(DATA.fl).attr("d",d3.geoPath(proj))
@@ -322,7 +322,7 @@ function render(){
   /* ---------- feature 2: county luck funnel + demoted table ---------- */
   function drawFunnel(host){
     const FW=680,FH=400,mL=44,mR=16,mT=20,mB=42;
-    const svg=d3.select(host).append("svg").attr("viewBox",`0 0 ${FW} ${FH}`).attr("width","100%");
+    const svg=d3.select(host).append("svg").attr("viewBox",`0 0 ${FW} ${FH}`).attr("width","100%").attr("role","img").attr("aria-label","County-level winners-per-capita chart with statistical confidence bands");
     const eMin=Math.max(.22,Math.min(...counties.map(c=>c.expected||.3))*.8);
     const eMax=Math.max(...counties.map(c=>c.expected||1))*1.18;
     const x=d3.scaleLog().domain([eMin,eMax]).range([mL,FW-mR]);

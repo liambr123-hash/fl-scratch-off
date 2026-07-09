@@ -71,7 +71,26 @@ window.FLX={routes:{},gameExtras:[],ready:[],
 
 /* ---------- charts registry ---------- */
 let charts=[];
-function newChart(el,cfg){if(!el||typeof Chart==="undefined")return null;const c=new Chart(el,cfg);charts.push(c);return c;}
+function newChart(el,cfg){if(!el||typeof Chart==="undefined")return null;
+  // a11y: expose the chart to assistive tech (nearest panel heading as the label)
+  try{const h=el.closest(".panel")?.querySelector("h2");
+    el.setAttribute("role","img");
+    if(!el.getAttribute("aria-label"))el.setAttribute("aria-label",(h?h.textContent.trim():"chart")+" (data visualization)");}catch(e){}
+  const c=new Chart(el,cfg);charts.push(c);return c;}
+/* a11y: make onclick-only elements keyboard-operable (call after each render) */
+const CLICKABLE_SEL=".tix,.more,.ti[data-g],.alertbar[data-g],#mini-dead,.dlcard[data-g],tr.click,.back,.tixpick,.wrec[id],.rt-wpill,.ins-anchor";
+function wireA11yClicks(root){
+  (root||document).querySelectorAll(CLICKABLE_SEL).forEach(el=>{
+    if(el.dataset.a11y||el.matches("a,button,input,select,textarea"))return;
+    el.dataset.a11y="1"; if(!el.hasAttribute("tabindex"))el.tabIndex=0;
+    if(!el.hasAttribute("role"))el.setAttribute("role","button");
+  });
+}
+document.addEventListener("keydown",e=>{
+  if((e.key==="Enter"||e.key===" ")&&e.target instanceof Element&&e.target.dataset&&e.target.dataset.a11y){
+    e.preventDefault(); e.target.click();
+  }
+});
 function clearCharts(){charts.forEach(c=>c.destroy());charts=[];}
 const gridC="rgba(128,128,128,.15)", tickC=getComputedStyle(document.body).color;
 Chart.defaults.color=tickC; Chart.defaults.borderColor=gridC;
@@ -89,11 +108,13 @@ function route(){
   const view=(Object.hasOwn(FLX.routes,tab)?FLX.routes[tab]:undefined)||(Object.hasOwn(builtins,tab)?builtins[tab]:undefined)||overview;  // FLX wins; hasOwn blocks prototype keys
   view(arg);
   document.dispatchEvent(new CustomEvent("flx:view",{detail:{tab,arg}}));
+  wireA11yClicks(mainEl);
   window.scrollTo(0,0);
 }
 window.addEventListener("hashchange",route);
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(b.dataset.tab!=="game")go(b.dataset.tab);});
-$("#meta-line").textContent=`${M.n_games} games · ${M.n_winners} top-prize winners · data ${M.built}`;
+$("#meta-line").textContent=`${M.n_games} games · ${M.n_winners} top-prize winners · data ${M.built}`
+  +(M.winners_stale>0?` · ${M.winners_stale} game${M.winners_stale>1?"s":""} awaiting a source update`:"");
 
 /* ---------- sortable table helper ---------- */
 function makeTable(cols,rows,opts={}){
@@ -128,9 +149,9 @@ function makeTable(cols,rows,opts={}){
       if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1;
       return (typeof x==="string"?x.localeCompare(y):x-y)*dir;
     });
-    let h='<table><thead><tr>'+cols.map(c=>`<th class="${c.r?"r":""} ${c.hideM?"hide-m":""}" data-k="${c.k}">${c.label}${c.k===sortK?` <span class="arr">${dir<0?"▼":"▲"}</span>`:""}</th>`).join("")+'</tr></thead><tbody>';
+    let h='<table><thead><tr>'+cols.map(c=>`<th class="${c.r?"r":""} ${c.hideM?"hide-m":""}" data-k="${c.k}" role="button" tabindex="0" data-a11y="1" aria-sort="${c.k===sortK?(dir<0?"descending":"ascending"):"none"}">${c.label}${c.k===sortK?` <span class="arr" aria-hidden="true">${dir<0?"▼":"▲"}</span>`:""}</th>`).join("")+'</tr></thead><tbody>';
     for(const row of sorted){
-      h+=`<tr${opts.rowClick?` class="click" data-id="${esc(opts.rowClick(row))}"`:""}>`+
+      h+=`<tr${opts.rowClick?` class="click" data-id="${esc(opts.rowClick(row))}" role="button" tabindex="0" data-a11y="1"`:""}>`+
         cols.map(c=>`<td class="${c.r?"r":""} ${c.hideM?"hide-m":""}">${c.fmt?c.fmt(row):esc(row[c.k]??"—")}</td>`).join("")+"</tr>";
     }
     wrap.innerHTML=h+"</tbody></table>";
@@ -204,11 +225,14 @@ function overview(){
   const tickItems=[
     ...recent.slice(0,6).map(w=>`<span class="ti" data-g="${w[0]}">${money(w[6])} claimed · ${esc(w[3]||"FL")} · ${esc(GAME_NAME[w[0]]||"")}</span>`),
     ...(()=>{const bigs=G.filter(g=>g.on_sale&&g.top_prize_value_num>=5e6&&g.top_prizes_remaining>0);const cnt=bigs.reduce((s,g)=>s+g.top_prizes_remaining,0);return cnt?[`<span class="ti">${cnt} × ${money(Math.max(...bigs.map(g=>g.top_prize_value_num)))}-class jackpots still unclaimed</span>`]:[];})(),
-    ...(posEV.length?[`<span class="ti" data-g="${posEV[0].game_no}">${esc(posEV[0].game_name)} is positive-EV (${f2(posEV[0].value_per_dollar_now)}/$)</span>`]:[])
+    ...(posEV.length?[`<span class="ti" data-g="${posEV[0].game_no}">${esc(posEV[0].game_name)}: a fragile positive-EV blip — see below</span>`]:[])
   ].join('<span class="tsep">◆</span>');
   mainEl.innerHTML=`
   <div class="ticker" aria-label="recent claims ticker"><div class="tk">${tickItems}<span class="tsep">◆</span>${tickItems}</div></div>
-  ${posEV.length?`<div class="alertbar" data-g="${posEV[0].game_no}"><span class="ab-text"><b>Statistical anomaly:</b>&nbsp;${esc(posEV[0].game_name)} ($${Math.round(posEV[0].ticket_price)}) is currently Florida's only <b>positive-EV</b> scratch-off — ${f2(posEV[0].value_per_dollar_now)} back per $1. Caveat: ${pct(posEV[0].pct_value_remaining)} of value left, selling fast.</span></div>`:""}
+  ${posEV.length?(()=>{const g=posEV[0];const tiers=(T[g.game_no]||[]).filter(t=>t[3]>0);
+    const top=tiers.reduce((a,t)=>t[1]>(a?a[1]:-1)?t:a,null);
+    const evAfter=(top&&g.est_tickets_remaining&&g.ticket_price)?(g.value_remaining-top[1])/(g.est_tickets_remaining*g.ticket_price):null;
+    return `<div class="alertbar" data-g="${g.game_no}"><span class="ab-text"><b>Statistical curiosity:</b>&nbsp;${esc(g.game_name)} ($${Math.round(g.ticket_price)}) is the rare game showing a hair more prize value left than it costs to play (${f2(g.value_per_dollar_now)} per $1)${top?` — but that whole edge rests on <b>${top[3]} unclaimed ${esc(top[0]||money(top[1]))}</b> prize${top[3]>1?"s":""}. The moment one is claimed it drops to about ${evAfter!=null?f2(evAfter):"—"}/$.`:"."} Not a tip: over any real number of tickets, every scratch-off is built to lose.</span></div>`;})():""}
   <div class="ministrip">
     <div class="mini"><b>${on.length}</b><span>games<br>on sale</span></div>
     <div class="mini"><b>${money(valLeft)}</b><span>prize money<br>remaining</span></div>
@@ -479,7 +503,7 @@ function maps(){
   </div>`;
   const COL=[null,"#7d8f87","#2FB6A8","#FF6F91","#FF9E4A","#E24B5B"];
   const Wd=760,Hd=620;
-  const svg=d3.select("#map").append("svg").attr("viewBox",`0 0 ${Wd} ${Hd}`).attr("width","100%");
+  const svg=d3.select("#map").append("svg").attr("viewBox",`0 0 ${Wd} ${Hd}`).attr("width","100%").attr("role","img").attr("aria-label","Map of Florida showing top-prize winner locations by city");
   const proj=d3.geoMercator().fitExtent([[14,14],[Wd-14,Hd-14]],DATA.fl);
   const dark=matchMedia("(prefers-color-scheme: dark)").matches;
   svg.append("path").datum(DATA.fl).attr("d",d3.geoPath(proj))

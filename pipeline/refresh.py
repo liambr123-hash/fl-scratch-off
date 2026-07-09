@@ -138,6 +138,7 @@ PDF_HDR={
 }
 PDFCACHE=os.path.join(ROOT,"pipeline","pdfcache")   # committed fallback: last-known-good PDFs
 _PDF_STRATEGY=[None]  # remember the first rung that works and lead with it
+PDF_CACHED=[]         # games whose winner PDF fell back to cache this run (for an honest freshness note)
 
 def _pdf_fetch(url):
     """Escalation ladder: the CDN TLS-fingerprints clients (CI gets SSLV3_ALERT_HANDSHAKE_FAILURE),
@@ -213,6 +214,7 @@ def fetch_pdfs(ids):
         print(f"! PDF source unreachable for {len(cached)} games — using committed last-known-good PDFs (winners may lag until the next successful full fetch)",flush=True)
     if _PDF_STRATEGY[0] and not cached:
         print(f"   (fetched live via {_PDF_STRATEGY[0]})",flush=True)
+    PDF_CACHED[:]=sorted(cached)   # games whose winners came from cache this run (source unreachable)
     return ok
 
 def fetch_deadlines():
@@ -722,7 +724,8 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     on=[g for g in D["games"] if g["on_sale"]]
     D["meta"]={"built":time.strftime("%Y-%m-%d"),"n_games":len(D["games"]),"n_winners":len(D["winners"]),
       "on_sale":len(on),"tp_left":sum(g["top_prizes_remaining"] or 0 for g in on),
-      "value_left":sum(g["value_remaining"] or 0 for g in on)}
+      "value_left":sum(g["value_remaining"] or 0 for g in on),
+      "winners_stale":len(PDF_CACHED)}   # games whose winners came from cache (source unreachable) — honest freshness
     # append nightly history snapshot (compact; grows ~2KB/day)
     hpath=os.path.join(PUB,"history.json")
     try: hist=json.load(open(hpath))
