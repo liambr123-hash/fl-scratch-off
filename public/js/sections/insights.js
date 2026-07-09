@@ -201,8 +201,7 @@ function render(){
       <div><div class="ins-h3">by day of week</div><div class="chartbox ins-short"><canvas id="ins-dowC"></canvas></div></div>
       <div><div class="ins-h3">by calendar month, all years pooled</div><div class="chartbox ins-short"><canvas id="ins-monC"></canvas></div></div>
     </div>
-    <p class="ins-cav">Claim date ≠ scratch date — winners can sit on a ticket for 90+ days. The January peak (the two busiest days on
-      record are both in January) partly reflects the launch calendar — flagship $50 games launch in late winter — plus holiday
+    <p class="ins-cav">Claim date ≠ scratch date — winners can sit on a ticket for 90+ days. The January peak partly reflects the launch calendar — flagship $50 games launch in late winter — plus holiday
       backlogs; and the pooled months are uneven in count.</p>
   </div>
 

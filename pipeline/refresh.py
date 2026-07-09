@@ -169,10 +169,10 @@ def _pdf_fetch(url):
     for k in order:
         try:
             data=rungs[k]()
-            if data[:4]==b"%PDF" and b"%%EOF" in data[-2048:]:   # complete, untruncated PDF
+            if data[:4]==b"%PDF" and data.rstrip().endswith(b"%%EOF"):   # complete PDF: final %%EOF at true EOF
                 _PDF_STRATEGY[0]=k
                 return data,k
-            errs.append(f"{k}: {'truncated '+str(len(data))+'b (no %%EOF)' if data[:4]==b'%PDF' else 'non-PDF '+repr(data[:24])}")
+            errs.append(f"{k}: {'truncated '+str(len(data))+'b (no trailing %%EOF)' if data[:4]==b'%PDF' else 'non-PDF '+repr(data[:24])}")
         except Exception as e:
             errs.append(f"{k}: {type(e).__name__} {str(e)[:60]}")
     raise RuntimeError(" | ".join(errs))
@@ -728,15 +728,15 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     try: hist=json.load(open(hpath))
     except FileNotFoundError: hist={"days":[]}   # corrupt JSON must crash: keeps the committed archive
     today=time.strftime("%Y-%m-%d")
-    if not any(d["d"]==today for d in hist["days"]):
-        snap={"d":today,"g":{}}
-        for g in D["games"]:
-            if g["on_sale"]:
-                snap["g"][g["game_no"]]=[g["top_prizes_remaining"],g["pct_value_remaining"],g["value_per_dollar_now"]]
-        hist["days"].append(snap)
-        hist["days"]=hist["days"][-1095:]   # keep 3 years; extras.js fetches the whole file per visit
-        _tmp=hpath+".tmp"
-        json.dump(hist,open(_tmp,"w"),separators=(",",":")); os.replace(_tmp,hpath)
+    _nn=lambda x:max(0,x) if isinstance(x,(int,float)) else x   # top-prize counts are never negative
+    snap_g={g["game_no"]:[_nn(g["top_prizes_remaining"]),g["pct_value_remaining"],g["value_per_dollar_now"]]
+            for g in D["games"] if g["on_sale"]}
+    _cur=next((d for d in hist["days"] if d["d"]==today),None)
+    if _cur: _cur["g"]=snap_g          # same-day re-run refreshes today's entry (no stale freeze)
+    else: hist["days"].append({"d":today,"g":snap_g})
+    hist["days"]=hist["days"][-1095:]  # keep 3 years; extras.js fetches the whole file per visit
+    _tmp=hpath+".tmp"
+    json.dump(hist,open(_tmp,"w"),separators=(",",":")); os.replace(_tmp,hpath)
     _dpath=os.path.join(PUB,"data.js"); _dtmp=_dpath+".tmp"
     with open(_dtmp,"w") as f:
         f.write("const DATA="); json.dump(D,f,separators=(",",":")); f.write(";")
