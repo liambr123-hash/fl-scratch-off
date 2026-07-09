@@ -570,13 +570,14 @@ def write_stub_pages(D):
                     if ext in _exts and stem not in live:
                         os.remove(os.path.join(_dir,fn))
             except Exception: pass
-        n=0; npng=0
+        n=0; npng=0; sitemap=[]
         for g in D.get("games") or []:
             no=g.get("game_no")
             if not no: continue
             no=str(no)
             if not re.fullmatch(r"[A-Za-z0-9_-]+",no):  # path-safety
                 continue
+            sitemap.append(no)
             tiers=tiers_all.get(no) or []
             try:
                 svg=_og_svg(g,tiers)   # deterministic string
@@ -603,6 +604,14 @@ def write_stub_pages(D):
             except Exception as e:
                 print("   stub fail",no,e)
         print(f"· wrote/verified {n} OG stub pages"+(f" ({npng} PNG cards)" if npng else " (SVG cards)"))
+        # sitemap.xml so the 94 (otherwise orphan) stub pages are discoverable by search crawlers
+        today=time.strftime("%Y-%m-%d")
+        urls=[f"{SITE}/"]+[f"{SITE}/g/{no}" for no in sitemap]
+        sm='<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        sm+="".join(f"<url><loc>{u}</loc><lastmod>{today}</lastmod></url>\n" for u in urls)+"</urlset>\n"
+        with open(os.path.join(PUB,"sitemap.xml"),"w",encoding="utf-8") as f: f.write(sm)
+        with open(os.path.join(PUB,"robots.txt"),"w",encoding="utf-8") as f:
+            f.write(f"User-agent: *\nAllow: /\nSitemap: {SITE}/sitemap.xml\n")
     except Exception as e:
         print("   write_stub_pages failed (non-fatal):",e)
 def _svg_to_png(svg,path):
