@@ -30,7 +30,7 @@ header{padding:20px 28px 0;max-width:1300px;margin:0 auto}
 .tipjar:hover .jar{transform:translateY(-1px) rotate(-4deg)}
 .tipjar:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 @media(max-width:600px){.tipjar span{display:none}.tipjar{padding:5px 6px;gap:0}}
-.brand svg{flex:none}
+.brand > svg{flex:none}
 .brand h1{font-family:var(--serif);font-size:25px;font-weight:600;letter-spacing:-.01em;line-height:1.05}
 .brand h1 em{font-style:italic;color:var(--flamingo);font-weight:500}
 .brand .sub{display:block;color:var(--muted);font-size:12.5px;font-weight:400;font-family:var(--sans);letter-spacing:.02em;margin-top:3px}
@@ -117,7 +117,7 @@ footer .disc{color:var(--muted);font-weight:500}
 @media(max-width:640px){
   header{padding:14px 14px 0}
   main{padding:14px}
-  .brand svg{width:34px;height:44px}
+  .brand > svg{width:34px;height:44px}
   .brand h1{font-size:19px}
   .brand .sub{font-size:11.5px}
   nav{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
