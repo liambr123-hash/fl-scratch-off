@@ -1,12 +1,14 @@
 name: Nightly data refresh
 
 on:
-  # GitHub silently delays or drops scheduled runs under load (worst on/near the hour), so we use an
-  # odd minute plus an afternoon safety net: if the morning run is skipped or fails, the second
-  # self-heals. A same-day rerun no-ops when the upstream data hasn't changed.
+  # The FL Lottery regenerates its game/winner data in a once-daily overnight batch, game by game,
+  # roughly 1:10-6:20am ET. There is no intraday update and no webhook — verified: ~160M prize
+  # counters were byte-identical between an 09:00 and a 15:00 UTC read. So we poll once, AFTER their
+  # batch finishes (never during, or we'd bake a half-updated snapshot), plus an afternoon safety net
+  # because GitHub silently delays/drops scheduled runs. A same-day rerun no-ops if nothing changed.
   schedule:
-    - cron: "23 9 * * *"    # ~5:23am ET, after the FL Lottery's nightly file update
-    - cron: "47 15 * * *"   # ~11:47am ET safety net
+    - cron: "7 11 * * *"    # 7:07am ET — ~45min after the Lottery's batch completes (~6:20am ET)
+    - cron: "47 15 * * *"   # 11:47am ET safety net
   workflow_dispatch: {}      # lets you run it manually from the Actions tab
 
 permissions:
