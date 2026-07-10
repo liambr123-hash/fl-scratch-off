@@ -937,7 +937,9 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
       "expiring":deadlines.get("expiring") or []}
     D["fl"]=fl_geo
     on=[g for g in D["games"] if g["on_sale"]]
-    D["meta"]={"built":time.strftime("%Y-%m-%d"),"n_games":len(D["games"]),"n_winners":len(D["winners"]),
+    D["meta"]={"built":time.strftime("%Y-%m-%d"),
+      "built_at":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),   # real build time (UTC); the UI renders it locally
+      "n_games":len(D["games"]),"n_winners":len(D["winners"]),
       "on_sale":len(on),"tp_left":sum(g["top_prizes_remaining"] or 0 for g in on),
       "value_left":sum(g["value_remaining"] or 0 for g in on),
       "winners_stale":len(PDF_CACHED)}   # games whose winners came from cache (source unreachable) — honest freshness

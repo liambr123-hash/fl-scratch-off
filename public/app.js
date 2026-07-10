@@ -113,8 +113,32 @@ function route(){
 }
 window.addEventListener("hashchange",route);
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{if(b.dataset.tab!=="game")go(b.dataset.tab);});
-$("#meta-line").textContent=`${M.n_games} games · ${M.n_winners} top-prize winners · data ${M.built}`
-  +(M.winners_stale>0?` · ${M.winners_stale} game${M.winners_stale>1?"s":""} awaiting a source update`:"");
+/* ---------- data freshness ----------
+   Computed in the BROWSER, never baked, so a stale build can't keep claiming "up to date".
+   The FL Lottery republishes its numbers each morning in a staggered batch finishing ~6:20am ET;
+   this site rebuilds right after. So "up to date" == our data is the Lottery's latest snapshot. */
+function freshness(){
+  try{
+    const dayET=d=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+    const hourET=d=>+new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"numeric",hour12:false}).format(d);
+    const now=new Date(), today=dayET(now), yest=dayET(new Date(now-864e5));
+    const latestSource=hourET(now)>=7?today:yest;   // before ~7am ET the Lottery's newest is still yesterday's
+    const age=Math.round((Date.parse(today)-Date.parse(M.built))/864e5);
+    if(M.built>=latestSource) return {s:"ok",label:"up to date"};
+    if(age<=1) return {s:"due",label:"today's update is due"};
+    return {s:"old",label:`data is ${age} days old`};
+  }catch(e){ return {s:"due",label:""}; }
+}
+(function metaLine(){
+  const f=freshness();
+  let when="";
+  if(M.built_at){const d=new Date(M.built_at); if(!isNaN(d)) when=", "+d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});}
+  const check='<svg class="ck" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.8 6.3l2.7 2.7 5.7-6.1" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const tip="The Florida Lottery republishes its numbers each morning (finishing about 6:20 AM ET). This site rebuilds itself right after, so these are the freshest figures the Lottery has released. Times shown in your local timezone.";
+  $("#meta-line").innerHTML=`${M.n_games} games · ${M.n_winners} top-prize winners · data ${esc(M.built)}${esc(when)}`
+    +(f.label?` <span class="fresh ${f.s}" title="${esc(tip)}">${f.s==="ok"?check:""}${esc(f.label)}</span>`:"")
+    +(M.winners_stale>0?` <span class="dim">· ${M.winners_stale} game${M.winners_stale>1?"s":""} awaiting a source update</span>`:"");
+})();
 
 /* ---------- sortable table helper ---------- */
 function makeTable(cols,rows,opts={}){

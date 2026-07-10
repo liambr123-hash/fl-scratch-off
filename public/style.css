@@ -34,6 +34,13 @@ header{padding:20px 28px 0;max-width:1300px;margin:0 auto}
 .brand h1{font-family:var(--serif);font-size:25px;font-weight:600;letter-spacing:-.01em;line-height:1.05}
 .brand h1 em{font-style:italic;color:var(--flamingo);font-weight:500}
 .brand .sub{display:block;color:var(--muted);font-size:12.5px;font-weight:400;font-family:var(--sans);letter-spacing:.02em;margin-top:3px}
+/* data-freshness chip (state decided in the browser, never baked) */
+.fresh{display:inline-flex;align-items:center;gap:4px;margin-left:5px;padding:1px 8px 1px 7px;border-radius:20px;
+  font-size:11.5px;font-weight:600;white-space:nowrap;cursor:help;vertical-align:1px}
+.fresh.ok{background:rgba(47,182,168,.14);color:var(--teal)}
+.fresh.due{background:rgba(157,176,167,.13);color:var(--muted)}
+.fresh.old{background:rgba(255,158,74,.15);color:var(--tangerine)}
+.fresh .ck{flex:none}
 .sunset{height:3px;border-radius:3px;margin:15px 0 0;background:linear-gradient(90deg,var(--tangerine),var(--flamingo) 42%,var(--coral) 60%,var(--teal))}
 nav{display:flex;gap:2px;margin:2px 0 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
 nav button{background:none;border:none;color:var(--muted);font:600 14px var(--sans);padding:11px 16px;cursor:pointer;border-bottom:2px solid transparent;transition:color .12s}
