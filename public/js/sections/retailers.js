@@ -146,10 +146,16 @@ function rtChainTable(R,clock,finder){
   const box=$("#rt-chainT"),trap=$("#rt-trap");
   if(!box)return;
   const liftCell=r=>{const c=r.lift>=1.3?"good":r.lift<=0.7?"bad":"mut";return `<span class="lift ${c}">${r.lift.toFixed(2)}×</span>`;};
-  const half=r=>r.winners>0?1.96/Math.sqrt(r.winners):0;
-  const ciMax=Math.max(...R.chains.map(c=>c.lift*(1+half(c))))*1.05;
+  // exact-Poisson 95% CI via Byar's approximation (matches the Garwood/chi-square interval to ~2 dp,
+  // even at the small counts here) — the old lift*(1±1.96/√n) Wald form is symmetric and understates
+  // the lower bound at small n. Returns multiplicative factors on the point lift.
+  const poiCI=k=>{ if(!(k>0))return [0,0]; const z=1.96;
+    const lo=k*Math.pow(1-1/(9*k)-z/(3*Math.sqrt(k)),3);
+    const hi=(k+1)*Math.pow(1-1/(9*(k+1))+z/(3*Math.sqrt(k+1)),3);
+    return [Math.max(0,lo)/k, hi/k]; };
+  const ciMax=Math.max(...R.chains.map(c=>c.lift*poiCI(c.winners)[1]))*1.05;
   const ciCell=r=>{
-    const h=half(r),lo=Math.max(0,r.lift*(1-h)),hi=r.lift*(1+h);
+    const [fl,fh]=poiCI(r.winners),lo=r.lift*fl,hi=r.lift*fh;
     const L=100*lo/ciMax,Wd=Math.max(1,100*(hi-lo)/ciMax),D=100*r.lift/ciMax,ref=100/ciMax;
     return `<div class="rt-ciwrap" title="95% CI ≈ ${lo.toFixed(2)}×–${hi.toFixed(2)}× (n=${r.winners})">
       <div class="rt-citrack"><i class="rt-ciref" style="left:${ref.toFixed(1)}%"></i><i class="rt-cirange" style="left:${L.toFixed(1)}%;width:${Wd.toFixed(1)}%"></i><i class="rt-cidot" style="left:${D.toFixed(1)}%"></i></div>
@@ -160,7 +166,7 @@ function rtChainTable(R,clock,finder){
     {k:"stores",label:"FL stores",r:1,fmt:r=>num(r.stores)},
     {k:"winners",label:"Winners",r:1},
     {k:"lift",label:"Lift",r:1,fmt:liftCell},
-    {k:"ci",label:"95% CI",fmt:ciCell,sortVal:r=>r.lift*(1-half(r))},
+    {k:"ci",label:"95% CI",fmt:ciCell,sortVal:r=>r.lift*poiCI(r.winners)[0]},
     {k:"yrs",label:"≈ yrs between wins*",r:1,hideM:1,fmt:r=>(clock&&r.lift>0)?"≈ "+Math.round(clock/r.lift):"—",sortVal:r=>(clock&&r.lift>0)?clock/r.lift:null},
   ],R.chains,{sort:"lift"}));
   box.onclick=e=>{

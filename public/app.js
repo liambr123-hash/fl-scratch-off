@@ -14,6 +14,10 @@ for(const g of G){
   for(const t of tiers){ if(t[2]>0){ pAnyD+=1/t[2]; if(t[1]>g.ticket_price) pProfit+=1/t[2]; } }
   g.profit_odds=pProfit>0?1/pProfit:null;          // 1-in-X to turn a profit
   g.p_any=g.overall_odds_1_in?1/g.overall_odds_1_in:pAnyD||null;
+  // Degenerate odds table (the pipeline withholds EV for exactly these): don't derive profit odds
+  // from tiers it distrusts. Keyed off EV-null, NOT data_quality — that field is also set for benign
+  // "annuity valued at cash-option" games whose tier tables (and profit odds) are perfectly valid.
+  if(g.on_sale&&g.value_per_dollar_now==null){ g.profit_odds=null; if(!g.overall_odds_1_in)g.p_any=null; }
   g.mil_left=tiers.filter(t=>t[1]>=1e6).reduce((s,t)=>s+(t[3]||0),0);   // $1M+ prizes remaining (all tiers)
   g.dead=!!(g.on_sale&&g.top_prizes_total>0&&g.top_prizes_remaining!=null&&g.top_prizes_remaining<=0);
   if(g.top_prizes_remaining!=null&&g.top_prizes_remaining<0)g.top_prizes_remaining=0;  // display clamp (API over-claims)
@@ -93,8 +97,10 @@ document.addEventListener("keydown",e=>{
 });
 function clearCharts(){charts.forEach(c=>c.destroy());charts=[];}
 const gridC="rgba(128,128,128,.15)", tickC=getComputedStyle(document.body).color;
-Chart.defaults.color=tickC; Chart.defaults.borderColor=gridC;
-Chart.defaults.font.family=getComputedStyle(document.body).fontFamily;
+if(typeof Chart!=="undefined"){   // survive a vendor/chart.umd.js load failure: keep tables, router, and the freshness chip alive (charts already no-op via newChart's guard)
+  Chart.defaults.color=tickC; Chart.defaults.borderColor=gridC;
+  Chart.defaults.font.family=getComputedStyle(document.body).fontFamily;
+}
 
 /* ---------- router ---------- */
 const mainEl=$("#main");
