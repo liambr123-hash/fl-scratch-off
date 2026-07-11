@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "flstatic",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8972", "--directory", "/Users/wb/Desktop/ticks/site-publish/public"],
+      "port": 8972
+    }
+  ]
+}
