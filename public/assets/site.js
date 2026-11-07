@@ -38,7 +38,7 @@
   const state = readLocation();
   if (state.q || state.sort !== 'new' || state.top) {
     const filterOptions = $('#filter-options');
-    if (filterOptions) filterOptions.open = true;
+    if (filterOptions?.tagName === 'DETAILS') filterOptions.open = true;
   }
   function saveUrl() {
     const url = new URL(location.href);
@@ -106,7 +106,15 @@
       if (active) link.setAttribute('aria-current', 'true'); else link.removeAttribute('aria-current');
     });
     $('#game-search').value = state.q;
-    $('#game-sort').value = state.sort;
+    const sortControl = $('#game-sort');
+    if (sortControl?.tagName === 'SELECT') sortControl.value = state.sort;
+    document.querySelectorAll('[data-sort]').forEach(button => {
+      const active = button.dataset.sort === state.sort;
+      button.setAttribute('aria-pressed', String(active));
+      button.classList.toggle('active', active);
+    });
+    if ($('#clear-search')) $('#clear-search').disabled = !state.q;
+    if ($('#search-count')) $('#search-count').textContent = state.q ? `${list.length} found` : '';
     $('#top-prize-only').checked = state.top;
     saveUrl();
   }
@@ -207,6 +215,10 @@
       }
       return;
     }
+    const sortButton = event.target.closest('[data-sort]');
+    if (sortButton && sorts.includes(sortButton.dataset.sort)) {
+      event.preventDefault(); state.sort = sortButton.dataset.sort; state.limit = 6; renderResults(); return;
+    }
     const price = event.target.closest('[data-price]');
     if (price) { event.preventDefault(); state.price = price.dataset.price; state.limit = 6; renderResults(); return; }
     const game = event.target.closest('[data-open-game]');
@@ -227,7 +239,12 @@
   document.addEventListener('change', event => { if (event.target.matches('[data-compare]')) toggleCompare(event.target.value, event.target.checked); });
   listen('#ticket-filters', 'submit', event => event.preventDefault());
   listen('#game-search', 'input', event => { state.q = event.target.value; state.limit = 6; renderResults(); });
-  listen('#game-sort', 'change', event => { state.sort = event.target.value; state.limit = 6; renderResults(); });
+  if ($('#game-sort')?.tagName === 'SELECT') {
+    listen('#game-sort', 'change', event => { state.sort = event.target.value; state.limit = 6; renderResults(); });
+  }
+  listen('#clear-search', 'click', () => {
+    state.q = ''; state.limit = 6; renderResults(); $('#game-search').focus();
+  });
   listen('#top-prize-only', 'change', event => { state.top = event.target.checked; state.limit = 6; renderResults(); });
   listen('#show-more', 'click', () => {
     const previousLimit = state.limit; state.limit += 6; renderResults();
