@@ -1,65 +1,77 @@
 # Florida Scratch-Off Statistician
 
-An independent, free, non-commercial site for Florida scratch-off statistics — live odds, prizes remaining, expected value, winner maps, and a full retailer analysis. Fully static; **rebuilds itself from the Florida Lottery's public data every night.**
+An independent Florida scratch-off comparison tool at [flscratchstats.com](https://flscratchstats.com). The homepage brings ticket comparisons, inline game details, new releases, reported claims, deadlines, sources and optional support into one page. Individual game and price pages remain readable search entry points with their own canonical URLs.
 
-> Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida.
+Published odds and prize counts are separated from modeled payout estimates. The site has no winning-ticket promises, paid ranking placements or required account. Support comes from optional [Ko-fi contributions](https://ko-fi.com/stuartmills) and clearly labeled sponsorships.
 
-## What's here
+## How it works
 
+| Area | Source |
+| --- | --- |
+| Live-data refresh and validation | `pipeline/refresh.py` |
+| Repair a committed snapshot without inventing a new source date | `pipeline/snapshot.py` |
+| HTML homepage and JSON/CSV downloads | `pipeline/build_site.py` |
+| Shared search-page shell and archived-game preservation | `pipeline/discovery.py` |
+| Homepage interactions and styling | `public/assets/site.js`, `public/assets/site.css` |
+| Canonical pages and generated data | `public/` |
+| Private sponsorship API and retention cleanup | `server/worker.mjs` |
+| Private inquiry schema | `migrations/0001_sponsor_inquiries.sql` |
+| Existing Cloudflare Worker and D1 binding | `wrangler.jsonc` |
+| Scheduled source refresh | `.github/workflows/refresh.yml` |
+
+The comparisons are generated as HTML, so useful content and game links exist before JavaScript runs. JavaScript adds filtering, inline details, comparison selection and sponsor-form submission. There is no Chart.js or D3 dependency in the new homepage.
+
+A Cloudflare Worker serves static assets and accepts sponsorship inquiries at `POST /api/sponsorship`. Inquiries are saved in a private D1 database. There is no public inquiry-list API and no automatic email or notification service; the owner reviews inquiries in Cloudflare. Rows older than 30 days are removed by daily cleanup and cleanup during new submissions. Cloudflare also provides aggregate traffic and performance analytics.
+
+## Local development
+
+Use Python 3.12, Node.js 22.13 or newer, and pnpm. Node must be available on `PATH`; Worker tests use the built-in `node:sqlite` module.
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r pipeline/requirements.txt
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test:python
+pnpm test:worker
 ```
-public/            ← the website (this is what gets served)
-  index.html  style.css  app.js  data.js  about.html
-pipeline/
-  refresh.py         ← pulls live data → rebuilds public/data.js (no database needed)
-  requirements.txt   ← pdfplumber
-  fl_feature.json    ← Florida outline for the maps
-.github/workflows/
-  refresh.yml        ← nightly GitHub Action that runs refresh.py and commits new data
+
+`pnpm build` uses the existing `public/data.js` snapshot. It repairs supported data-quality issues, regenerates game/search pages, builds the homepage and downloads, and applies the shared shell. It does not fetch new Lottery data or change the original source timestamp.
+
+For a local preview with the sponsorship API:
+
+```sh
+pnpm exec wrangler d1 migrations apply flscratchstats-sponsors --local
+pnpm dev
 ```
 
-The site is 100% static. `data.js` holds everything; the browser needs only Chart.js and D3 (loaded from a CDN). No server, no build step, no tracking.
+Open [localhost:8642](http://localhost:8642). Local D1 data is isolated from the production database. Use synthetic details for local form checks. Do not submit real or test inquiries to the live form during routine deployment verification.
 
-## Run / refresh locally
+A plain static server can preview the HTML, filters and styling, but cannot receive sponsorship inquiries:
 
-```bash
-pip install -r pipeline/requirements.txt
-python3 pipeline/refresh.py          # ~2 min: fetches live data, rewrites public/data.js
-python3 -m http.server -d public 8642 # then open http://localhost:8642
+```sh
+python3 -m http.server 8642 --bind 127.0.0.1 --directory public
 ```
 
-## Publish it: Cloudflare Pages + your own domain (free)
+## Refreshing data
 
-**1 — Put this folder on GitHub.** Create a free GitHub account, make a new repository (e.g. `fl-scratch-offs`), then from this folder:
-
-```bash
-git init && git add -A && git commit -m "initial"
-git branch -M main
-git remote add origin https://github.com/<you>/fl-scratch-offs.git
-git push -u origin main
+```sh
+python3 pipeline/refresh.py
 ```
 
-**2 — Connect Cloudflare Pages.** Sign up free at [pages.cloudflare.com](https://pages.cloudflare.com) → **Create a project** → **Connect to Git** → pick your repo. Build settings:
+This fetches official Florida Lottery game data, public winner reports and supporting public datasets. It rebuilds the shared snapshot, history, game pages, sitemap, homepage and downloads together. Major source-coverage failures abort the refresh. Invalid or inconsistent records are labeled and excluded from recommendation lists rather than silently presented as verified comparisons.
 
-| Setting | Value |
-|---|---|
-| Framework preset | **None** |
-| Build command | *(leave blank)* |
-| Build output directory | **`public`** |
+Game headline counts use the same advertised prize tier as the official game table. Winner-report claims are matched by prize identity; a lower claimed tier is not promoted to the advertised jackpot. Removed game files are retained as clearly labeled archive snapshots rather than deleted just because they disappear from today's feed. A count correction is not described as a newly reported claim.
 
-Click **Save and Deploy**. In ~30 seconds you get a live URL like `fl-scratch-offs.pages.dev`.
+The existing GitHub Action schedules refreshes at **12:07 UTC and 16:47 UTC** (7:07/11:47 a.m. EST or 8:07 a.m./12:47 p.m. EDT) and commits generated files. The primary run stays after the historically observed overnight source-update window in both seasons; GitHub may dispatch it later. Cloudflare's existing Git deployment connection must use the same current source; publishing a local redesign without synchronizing GitHub can otherwise be replaced by a later automated deployment. See [DEPLOYMENT.md](DEPLOYMENT.md) for the verified database setup, publication steps and owner review query.
 
-**3 — Add your custom domain.** Buy a domain (~$10/yr — Cloudflare Registrar is at-cost). In your Pages project → **Custom domains** → **Set up a domain** → type your domain → Cloudflare adds the DNS automatically if the domain is on Cloudflare. Done — HTTPS is automatic and free.
+## Discovery and measurement
 
-**4 — Turn on nightly auto-refresh.** The included Action (`.github/workflows/refresh.yml`) runs every morning, rebuilds `data.js` from the live API, and commits it — which triggers Cloudflare to redeploy. Enable it: GitHub repo → **Actions** tab → enable workflows. To test now: **Actions → Nightly data refresh → Run workflow**.
+- Keep the homepage and existing game/price canonical URLs available. The homepage provides ordinary crawlable links to all current games and price lists.
+- Submit `https://flscratchstats.com/sitemap.xml` in the owner's Google Search Console property after publication. Search Console verification is an owner action; no verification token has been invented or added.
+- The refresh pipeline supports IndexNow for supporting search engines. IndexNow does not submit URLs to Google.
+- Use Search Console clicks, impressions, click-through rate and average position for organic growth. Cloudflare request counts or edge uniques are not exact counts of human unique visitors.
+- Keep source timestamps truthful. A site rebuild or interface change is not a fresh Lottery-data retrieval.
 
-That's it — a free, auto-updating public site on your own domain.
-
-## Notes
-
-- **Data freshness:** the Florida Lottery updates its winner files overnight; the Action is scheduled for ~5:20am ET.
-- **Costs:** GitHub (free), Cloudflare Pages (free, unlimited bandwidth), domain (~$10/yr, optional — the `.pages.dev` URL is free).
-- **Editing the look:** all styling is in `public/style.css`; the app logic is `public/app.js`. Re-run `refresh.py` only when you want fresh data.
-
-## Data & legal
-
-Sources are the Florida Lottery's own public data feeds and public Top-Prize Winner reports (see `about.html`). All figures are referenced factually from public records. Play responsibly — **1-888-ADMIT-IT**.
+The project is not affiliated with, endorsed by or sponsored by the Florida Lottery or the State of Florida. Prize availability and deadlines should be verified with the official source. Every game has a house edge by design.

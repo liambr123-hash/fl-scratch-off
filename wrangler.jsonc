@@ -1,7 +1,20 @@
 {
   "name": "fl-scratch-off",
+  "main": "server/worker.mjs",
   "compatibility_date": "2026-07-08",
   "assets": {
-    "directory": "public"
-  }
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api", "/api/*"],
+    "not_found_handling": "404-page"
+  },
+  "d1_databases": [
+    {
+      "binding": "LEADS",
+      "database_name": "flscratchstats-sponsors",
+      "database_id": "2f5bc061-c1a2-46ae-aa8a-aa8263f9ad29",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {"crons": ["17 9 * * *"]}
 }

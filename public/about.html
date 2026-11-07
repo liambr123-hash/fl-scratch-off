@@ -1,41 +1,22 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+<!doctype html>
+<html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>About · Florida Scratch-Off Statistician</title>
-<link rel="stylesheet" href="style.css">
+
 <link rel="canonical" href="https://flscratchstats.com/about">
 <meta name="description" content="How flscratchstats.com works: where the Florida scratch-off data comes from, the open Value Score formula, expected-value methodology, and the honest disclaimers.">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 58'><ellipse cx='22' cy='33' rx='11.5' ry='8' fill='%23FF6F91'/><path d='M24 27 C 20 18, 30 14, 25.5 8' fill='none' stroke='%23FF6F91' stroke-width='5.4' stroke-linecap='round'/><circle cx='25.5' cy='8' r='3.6' fill='%23FF6F91'/></svg>">
-<style>
-  .prose{max-width:760px;margin:0 auto}
-  .prose p{margin:0 0 14px;color:var(--text)}
-  .prose h2{font-family:var(--serif);font-size:19px;margin:26px 0 10px}
-  .prose ul{margin:0 0 14px 20px;color:var(--text)} .prose li{margin:5px 0}
-  .prose code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:13px}
-  .lead{font-size:16px;color:var(--muted)}
-</style>
+<link rel="stylesheet" href="/assets/site.css">
 </head>
-<body>
-<header>
-  <div class="brand">
-    <svg width="44" height="58" viewBox="0 0 44 58" aria-hidden="true">
-      <g stroke="#FF6F91" stroke-width="2.6" stroke-linecap="round" fill="none">
-        <path d="M20 34 L20 53"/><path d="M25 34 L29 47 L26 53"/></g>
-      <ellipse cx="22" cy="33" rx="11.5" ry="8" fill="#FF6F91"/>
-      <path d="M24 27 C 20 18, 30 14, 25.5 8" fill="none" stroke="#FF6F91" stroke-width="5.4" stroke-linecap="round"/>
-      <circle cx="25.5" cy="8" r="3.6" fill="#FF6F91"/>
-      <path d="M23 8.5 L16 11.5" stroke="#E24B5B" stroke-width="3" stroke-linecap="round"/>
-    </svg>
-    <div><h1>About &amp; Methodology</h1><span class="sub"><a href="index.html">← back to the data</a></span></div>
-  </div>
-  <div class="sunset"></div>
-</header>
-<main>
+<body class="landing-page">
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="site-brand" href="/" aria-label="FL Scratch Stats home"><img src="/assets/flamingo.svg" width="30" height="40" alt="" aria-hidden="true"><span>FL Scratch Stats<small>Florida scratch-off data, made clear.</small></span></a><nav class="site-nav" aria-label="Main navigation"><a href="/#tickets">All tickets</a><a href="/#new-games">New games</a><a href="/#changes">What's changed</a><a href="/#deadlines">Deadlines</a><a href="/#methodology">How it works</a><a href="/#support">Support</a></nav></header>
+<main id="main-content" class="landing-main"><article class="landing-content"><!-- discovery:content:start -->
+<h1>About &amp; methodology</h1>
 <div class="prose">
-  <p class="lead">An independent, non-commercial hobby project that turns Florida's public scratch-off data into something you can actually read — odds, remaining prizes, expected value, winners, and retailers.</p>
+  <p class="lead">An independent project that makes Florida's public scratch-off data easier to read — published odds, remaining prizes, estimated payout, and reported claims. Core comparisons are free, with optional support and clearly labeled sponsorships.</p>
 
   <h2>Where the numbers come from</h2>
   <ul>
@@ -67,15 +48,19 @@
   <p>Odds and prize counts change constantly — always verify on the official Florida Lottery site or app before buying. Nothing here improves your odds; scratch-offs are a form of entertainment with a built-in house edge, and every ticket's outcome is independent.</p>
   <p><b>Play responsibly.</b> If gambling is causing harm, call the Florida Council on Compulsive Gambling: <b>1-888-ADMIT-IT</b> (1-888-236-4848). Must be 18+ to play.</p>
 
-  <h2>Open by design</h2>
-  <p>The site is fully static and rebuilds itself from the public data every night. The code and data pipeline are open — no tracking, no ads, no accounts.</p>
+  <h2>Open data and clear update times</h2>
+  <p>The comparison pages are generated as readable HTML from a shared data snapshot. An automated daily refresh rebuilds the homepage, individual game pages, downloads, and search sitemap. The displayed snapshot date records the source build; a design update does not make old data look new. If a source fails validation, the site keeps the last usable snapshot.</p>
+  <p>The <a href="https://github.com/liambr123-hash/fl-scratch-off">code and data pipeline are public</a>. You can download the <a href="/data.json">full snapshot</a> or <a href="/games.csv">game data as CSV</a>. Published prize counts, model estimates, and source limitations are labeled separately.</p>
 
-  <h2>Support</h2>
-  <p>This is a free, ad-free tool built and maintained by one person. If it's helped you, a small <a href="https://ko-fi.com/stuartmills" target="_blank" rel="noopener">tip in the jar</a> keeps it running — entirely optional, and genuinely appreciated.</p>
+  <h2>Traffic analytics and privacy</h2>
+  <p>Cloudflare provides aggregate traffic and performance analytics and operates the site's network infrastructure. The site has no user accounts or advertising trackers. Its comparison interface does not ask for your contact details.</p>
+  <p>Opening Ko-fi takes you to Ko-fi's own service and privacy terms. The optional sponsorship form sends only the information described below to this site's private inquiry database.</p>
+
+  <h2>Support and sponsorships</h2>
+  <p>Optional <a href="https://ko-fi.com/stuartmills" target="_blank" rel="noopener">Ko-fi support</a> helps cover the work. Sponsorships will be clearly labeled. Sponsors cannot pay for a higher ticket ranking, alter the calculations, or control the conclusions. Core comparisons remain free.</p>
+  <p>To discuss a sponsorship, use the <a href="/#support">sponsorship inquiry form</a>. It stores your name, company or project, reply email, message, optional budget, consent version, submission time, and a reference ID in a private Cloudflare D1 database. This information is available to the project owner for reviewing and replying to the inquiry; it is not published or added to a mailing list. The form does not store your IP address, browser user agent, or referrer in that database.</p>
+  <p>Inquiries older than 30 days are removed by daily cleanup and cleanup on new submissions. Submitting the form saves the inquiry for private review; it does not automatically send email or guarantee an immediate reply. Any reply is handled separately by the project owner using the contact information you provide.</p>
 </div>
-</main>
-<footer>
-  <p class="disc">Not affiliated with, endorsed by, or sponsored by the Florida Lottery or the State of Florida. Play responsibly · 1-888-ADMIT-IT.</p>
-</footer>
-</body>
-</html>
+<!-- discovery:content:end --><p class="landing-return"><a class="button" href="/#methodology">Back to the comparison tool &rarr;</a></p></article></main>
+<footer class="landing-footer"><p>Independent Florida scratch-off statistics. Not affiliated with or endorsed by the Florida Lottery or the State of Florida.</p><p>Published odds describe the game; estimates are not a guarantee of remaining inventory. Verify current game status and prize counts with the <a href="https://floridalottery.com/games/scratch-offs">Florida Lottery</a>. Every game has a house edge by design. 18+.</p><nav aria-label="More information"><a href="/#methodology">Sources &amp; methodology</a><a href="/#support">Support this project</a><a href="https://github.com/liambr123-hash/fl-scratch-off">View the source</a><a href="/">Back to all tickets</a></nav></footer>
+</body></html>

@@ -4,10 +4,12 @@ Runs standalone (CI or local). No pre-existing database required.
   python3 pipeline/refresh.py
 Sources: official getscratchinfo API, winner-report PDFs, retailer locator API, GeoNames ZIP centroids.
 """
-import json, os, re, sys, sqlite3, statistics, io, zipfile, urllib.request, urllib.parse, time, html
+import json, os, re, sys, sqlite3, statistics, io, zipfile, urllib.request, urllib.parse, time, html, hashlib
 from collections import defaultdict
+from datetime import date
 
 ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path: sys.path.insert(0,ROOT)
 PUB=os.path.join(ROOT,"public")
 CACHE=os.path.join(ROOT,"pipeline",".cache"); os.makedirs(CACHE,exist_ok=True)
 GW="https://apim-website-prod-eastus.azure-api.net"
@@ -38,6 +40,82 @@ def ndate(s):
     if not s: return None
     m=re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})",str(s))
     return f"{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}" if m else None
+
+def iso_date(value):
+    """Validate either upstream date format, without assigning a date to missing data."""
+    text=str(value or "").strip()
+    text=text[:10] if re.match(r"^\d{4}-\d{2}-\d{2}",text) else ndate(text)
+    try: return date.fromisoformat(text).isoformat()
+    except (TypeError,ValueError): return None
+
+def prize_identity(value):
+    """Compare advertised prizes before cash-option repricing, including annuity units."""
+    text=clean(str(value or "")).upper()
+    unit="week_life" if re.search(r"(?:WK|WEEK).*LIFE",text) else (
+        "year_life" if re.search(r"(?:YR|YEAR).*LIFE",text) else "cash")
+    return money(text),unit
+
+def api_headline_counts(tier):
+    """One advertised API tier owns the displayed headline and all three counters."""
+    def count(value):
+        try:
+            number=float(value)
+            return int(number) if number>=0 and number.is_integer() else None
+        except (ValueError,TypeError,OverflowError): return None
+    total=count(tier.get("TotalPrizes")); paid=count(tier.get("PrizesPaid"))
+    remaining=count(tier.get("PrizesRemaining"))
+    if any(tier.get(key) is not None and value is None for key,value in (
+            ("TotalPrizes",total),("PrizesPaid",paid),("PrizesRemaining",remaining))):
+        return None,None,None
+    if total is not None and remaining is None and paid is not None: remaining=total-paid
+    if total is not None and paid is None and remaining is not None: paid=total-remaining
+    valid=(total is not None and total>0 and paid is not None and remaining is not None
+           and 0<=paid<=total and 0<=remaining<=total and paid+remaining==total)
+    return (total,paid,remaining) if valid else (None,None,None)
+
+def game_quality(game,as_of=None):
+    """Public quality flags; a delayed winner report does not invalidate fresh API odds."""
+    today=iso_date(as_of) or time.strftime("%Y-%m-%d")
+    report=iso_date(game.get("last_queried")); launch=iso_date(game.get("launch_date"))
+    notes=game.get("data_quality") or ""
+    quarantined="Quarantined:" in notes or bool(report and launch and report<launch)
+    old=not report or (date.fromisoformat(today)-date.fromisoformat(report)).days>7 or game.get("value_per_dollar_now") is None
+    eligible=bool(game.get("on_sale") and game.get("value_per_dollar_now") is not None and not quarantined)
+    return {"recommendation_eligible":eligible,
+            "source_status":"quarantined" if quarantined else ("limited" if old else "verified"),
+            "source_report_date":report}
+
+def normalize_deadlines(games,feeds,as_of=None):
+    """Merge explicit closure feeds into one date-based model, retaining legacy keys."""
+    today=iso_date(as_of) or time.strftime("%Y-%m-%d")
+    by_id={str(g.get("game_no")):g for g in games if g.get("game_no") is not None}
+    records={}
+    for group in ("ending","expiring"):
+        for raw in (feeds or {}).get(group) or []:
+            gid=str(raw.get("Id",raw.get("id",raw.get("GameId",""))))
+            if not gid: continue
+            game=by_id.get(gid,{})
+            prior=records.get(gid,{})
+            sell=iso_date(raw.get("LastDayToSell") or raw.get("last_sell")) or prior.get("last_sell") or iso_date(game.get("end_date"))
+            redeem=iso_date(raw.get("LastDayToRedeem") or raw.get("last_redeem") or raw.get("RedemptionDate")) or prior.get("last_redeem") or iso_date(game.get("redemption_date"))
+            records[gid]={"id":gid,"name":clean(raw.get("GameName") or raw.get("name") or game.get("game_name") or f"Game #{gid}"),
+                          "price":raw.get("TicketPrice",raw.get("price",game.get("ticket_price"))),
+                          "last_sell":sell,"last_redeem":redeem}
+    # API EndDate can be a far-future placeholder: only inferred closures already reached
+    # today join this list. Future reminders require an explicit ending/expiring feed.
+    for gid,game in by_id.items():
+        sell=iso_date(game.get("end_date")); redeem=iso_date(game.get("redemption_date"))
+        if gid not in records and sell and sell<=today and redeem:
+            records[gid]={"id":gid,"name":game.get("game_name") or f"Game #{gid}","price":game.get("ticket_price"),
+                          "last_sell":sell,"last_redeem":redeem}
+    for record in records.values():
+        sell=record["last_sell"]; redeem=record["last_redeem"]
+        record["status"]="expired" if redeem and redeem<today else (
+            "upcoming" if sell and sell>=today else "redeemable")
+    items=sorted(records.values(),key=lambda r:(r["last_redeem"] or "9999",r["last_sell"] or "9999",r["id"]))
+    return {"items":items,"ending":[r for r in items if r["status"]=="upcoming"],
+            "expiring":[r for r in items if r["status"]=="redeemable"],
+            "expired":[r for r in items if r["status"]=="expired"]}
 
 # ---------------- winner-PDF parser (pdfplumber, coordinate columns) ----------------
 def parse_pdf(path):
@@ -275,7 +353,7 @@ def catOf(n):
     return "Other/Independent"
 
 # ---------------- build DB ----------------
-def build_db(games_api,parses,census,geo):
+def build_db(games_api,parses,census,geo,as_of=None):
     zipmap,ccent,z2c=geo
     db=os.path.join(ROOT,"lottery.db")
     if os.path.exists(db): os.remove(db)
@@ -296,31 +374,35 @@ def build_db(games_api,parses,census,geo):
       lat REAL,lon REAL,has_vending INTEGER,district TEXT);
     CREATE TABLE data_quality(game_no TEXT,note TEXT);
     """)
-    today=time.strftime("%Y-%m-%d")
+    today=iso_date(as_of) or time.strftime("%Y-%m-%d")
     dq=defaultdict(list)
     # games + tiers
     for g in games_api:
         gid=str(g["Id"]); tiers=g.get("OddsTiers") or []
         name=clean(g["GameName"]); price=g.get("TicketPrice")
-        end=(g.get("EndDate") or "")[:10]; on=0 if (end and end<=today) else 1
+        end=(g.get("EndDate") or "")[:10]; on=0 if (end and end<today) else 1
         p=parses.get(gid,{})
-        # headline top-prize counts from winner PDF (authoritative for claims), fallback to API tier0
-        hv=[money(t["value"]) for t in (p.get("tiers") or []) if t.get("value")]
-        headpdf=max(((t for t in p.get("tiers") or [] if t.get("value")),),default=None)
-        pdf_head=None
-        if hv:
-            mx=max(hv); pdf_head=next((t for t in p["tiers"] if money(t.get("value"))==mx),None)
-        tp_total=pdf_head["total"] if pdf_head else (tiers[0]["TotalPrizes"] if tiers else None)
-        tp_claim=pdf_head["claimed"] if pdf_head else (tiers[0].get("PrizesPaid") if tiers else None)
-        tp_rem=(tp_total-tp_claim) if (tp_total is not None and tp_claim is not None) else (tiers[0].get("PrizesRemaining") if tiers else None)
-        if tp_rem is not None and tp_rem<0 and tiers:
-            # PDF headline total disagrees with claimed count (API over-claim) -> trust API tier-0
-            tp_total,tp_claim,tp_rem=tiers[0].get("TotalPrizes"),tiers[0].get("PrizesPaid"),tiers[0].get("PrizesRemaining")
-        if tp_total==0:
-            # all-zero headline tier = stale/garbage upstream record, not a depleted game
-            tp_total=tp_claim=tp_rem=None
-        top_disp=tiers[0]["PrizeAmount"] if tiers else None
+        # OddsTiers[0] is the advertised headline tier, including life-annuity games.
+        # Winner PDFs may omit entirely unclaimed tiers, so their maximum claimed
+        # tier must never be promoted to the headline (the #1647 regression).
+        headline=tiers[0] if tiers else {}
+        top_disp=headline.get("PrizeAmount")
         top_val=money(top_disp)
+        tp_total,tp_claim,tp_rem=api_headline_counts(headline)
+        if tp_total is None:
+            dq[gid].append("Quarantined: the official headline prize counters are missing or inconsistent.")
+        report=iso_date(p.get("last_queried")); launch=iso_date(g.get("LaunchDate"))
+        if report and launch and report<launch:
+            dq[gid].append(f"Quarantined: winner report dated {report} predates this game's {launch} launch.")
+        elif report and (date.fromisoformat(today)-date.fromisoformat(report)).days>7:
+            dq[gid].append(f"Winner report last updated {report}; winner records may lag the current game odds table.")
+        elif not report:
+            dq[gid].append("Winner report date unavailable; prize counters come from the current game odds table.")
+        matching_pdf=next((t for t in p.get("tiers") or []
+                           if prize_identity(t.get("value"))==prize_identity(top_disp)),None)
+        if matching_pdf and tp_total is not None and (
+                matching_pdf.get("total")!=tp_total or matching_pdf.get("claimed")!=tp_claim):
+            dq[gid].append("Winner report and game odds counters differ; headline counts use the official game odds table.")
         c.execute("INSERT INTO games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (gid,name,price,top_disp,top_val,f"1:{g.get('OverallOdds')}",g.get("OverallOdds"),
              tp_total,tp_claim,tp_rem,(g.get("LaunchDate") or "")[:10],end,(g.get("RedemptionDate") or "")[:10],on,p.get("last_queried"),None))
@@ -330,8 +412,9 @@ def build_db(games_api,parses,census,geo):
                 (gid,rank,t["PrizeAmount"],v,odds1in(t["WinningOdds"]),rem,tot,paid))
     # winners
     for gid,p in parses.items():
-        if not con.execute("SELECT 1 FROM games WHERE game_no=?",(gid,)).fetchone(): continue
-        hv=[money(t["value"]) for t in p["tiers"] if t.get("value")]; headv=max(hv) if hv else None
+        advertised=con.execute("SELECT top_prize_display FROM games WHERE game_no=?",(gid,)).fetchone()
+        if not advertised: continue
+        headline_identity=prize_identity(advertised[0])
         for w in p["winners"]:
             adv=money(w["advertised"]); rc=None
             if w["retailer_address"]:
@@ -339,7 +422,7 @@ def build_db(games_api,parses,census,geo):
             c.execute("""INSERT INTO top_prize_winners(game_no,prize_level_num,is_headline,seq,claim_date,winner_name,winner_city,
               winner_state,winner_zip,retailer_name,retailer_address,advertised_top_prize,payment,prize_payout,prize_payout_num)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-              (gid,adv,1 if (adv and headv and abs(adv-headv)<1) else 0,w["seq"],ndate(w["claim_date"]),w["winner_name"],
+              (gid,adv,1 if adv is not None and prize_identity(w["advertised"])==headline_identity else 0,w["seq"],ndate(w["claim_date"]),w["winner_name"],
                w["city"],w["state"],w["zip"],w["retailer_name"],w["retailer_address"],w["advertised"],
                w["payment"] or None,w["payout"] or None,money(w["payout"])))
     con.commit()
@@ -352,14 +435,12 @@ def build_db(games_api,parses,census,geo):
             con.execute("UPDATE prize_tiers SET prize_amount_value=? WHERE game_no=? AND tier_rank=0",(cash,gid))
             con.execute("UPDATE games SET top_prize_value_num=? WHERE game_no=?",(cash,gid))
             dq[gid].append(f"Annuity top prize valued at cash-option lump sum (${int(cash):,}).")
-    # blowout canonical remaining from odds tier0
-    for gid in ("1607","1626"):
-        t0=con.execute("SELECT remaining,original FROM prize_tiers WHERE game_no=? AND tier_rank=0",(gid,)).fetchone()
-        if t0: con.execute("UPDATE games SET top_prizes_remaining=?,top_prizes_total=?,top_prizes_claimed=? WHERE game_no=?",(t0[0],t0[1],t0[1]-t0[0],gid))
     con.commit()
     # ticket_analysis (guarded)
     for gr in con.execute("SELECT game_no,ticket_price,overall_odds_1_in FROM games"):
         gid,price,odv=gr["game_no"],gr["ticket_price"],gr["overall_odds_1_in"]
+        if any(note.startswith("Quarantined:") for note in dq[gid]):
+            dq[gid].append("Estimated payout withheld until the source discrepancy is resolved."); continue
         valid=[(t["prize_amount_value"],t["original"],t["remaining"],t["odds_1_in"]) for t in con.execute("SELECT * FROM prize_tiers WHERE game_no=? ORDER BY tier_rank",(gid,))
                if t["prize_amount_value"] is not None and t["original"] and t["original"]>0 and t["odds_1_in"] and t["odds_1_in"]>0]
         if not price or len(valid)<3 or not odv:
@@ -427,7 +508,7 @@ def _value_score(g,tiers):
        Returns int score or None (ended / no EV / degenerate)."""
     try:
         vpd_now=g.get("value_per_dollar_now"); on=g.get("on_sale")
-        if vpd_now is None or not on: return None
+        if vpd_now is None or not on or g.get("recommendation_eligible") is False: return None
         price=g.get("ticket_price") or 0
         pProfit=0.0
         for t in (tiers or []):
@@ -464,8 +545,8 @@ def _og_svg(g,tiers):
     ev_s=("$"+f"{evraw:.2f}") if evraw is not None else "—"
     tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
     rem_s=("{:,}".format(tp_rem) if tp_rem is not None else "—")+((" of {:,}".format(tp_tot)) if tp_tot else "")
-    sc=_value_score(g,tiers); sc_s=str(sc) if sc is not None else "—"
-    band,bc=_score_band(sc)
+    count_s=f"{tp_rem:,}" if tp_rem is not None else "—"
+    source_label="Unverified source record — see source notes" if g.get("source_status")=="quarantined" else "Modeled payout, not a prediction"
     # truncate very long names to keep the card readable (~26 chars per line, 2 lines)
     def wrap(t,width=24,maxlines=2):
         words=t.split(" "); lines=[]; cur=""
@@ -488,8 +569,8 @@ def _og_svg(g,tiers):
                 f'<text x="{x}" y="530" font-family="Georgia,\'Times New Roman\',serif" font-size="56" font-weight="700" fill="{vcolor}">{_hesc(value)}</text>')
     cells=(cell(80,"PRICE",price_s)
            +cell(320,"TOP PRIZE",top_s,"#FF9E4A")
-           +cell(640,"EV / $1",ev_s,"#2FB6A8")
-           +cell(900,"VALUE SCORE",f"{sc_s}",bc))
+           +cell(640,"EST. PAYOUT / $1",ev_s,"#2FB6A8")
+           +cell(940,"TOP PRIZES LEFT",count_s,"#8FD9D2"))
     return (
 '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">'
 '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
@@ -503,7 +584,7 @@ f'<text x="80" y="150" font-family="Arial,Helvetica,sans-serif" font-size="24" f
 f'{title_svg}'
 '<line x1="80" y1="410" x2="1120" y2="410" stroke="#2a2230" stroke-width="2"/>'
 f'{cells}'
-f'<text x="80" y="590" font-family="Arial,Helvetica,sans-serif" font-size="24" fill="#9aa4ad">Top prizes remaining: {_hesc(rem_s)} &#183; {_hesc(band)}</text>'
+f'<text x="80" y="590" font-family="Arial,Helvetica,sans-serif" font-size="24" fill="#9aa4ad">Top prizes remaining: {_hesc(rem_s)} &#183; {_hesc(source_label)}</text>'
 '</svg>')
 # ---- shared static-page chrome for stubs + SEO landing pages ----
 _PAGE_CSS=("body{margin:0;background:#0f1e1c;color:#ece8dd;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;line-height:1.6}"
@@ -556,15 +637,17 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
     odds_s=(f"1 in {odds}") if odds is not None else "n/a"
     tp_rem=g.get("top_prizes_remaining"); tp_tot=g.get("top_prizes_total")
     rem_s=("{:,}".format(tp_rem) if tp_rem is not None else "?")+((" of {:,}".format(tp_tot)) if tp_tot else "")
-    sc=_value_score(g,tiers)
     lq=ndate(g.get("last_queried")) or (g.get("last_queried") or "")[:10].strip()   # ISO, matches landing pages
     launch=(g.get("launch_date") or "")[:10]; redeem=(g.get("redemption_date") or "")[:10]
     _dup=(name.strip().lower(),(int(price) if price is not None else None)) in _DUP_KEYS
     _idn=f" (Game #{no})" if _dup else ""   # distinguish same-name reissues so titles/H1 aren't duplicate
     on_sale=bool(g.get("on_sale"))
+    quarantined=g.get("source_status")=="quarantined" or "Quarantined:" in (g.get("data_quality") or "")
     # Price-first short titles: the price is the key differentiator and must survive SERP truncation.
     _ptok=f"{price_s}, #{no}" if _dup else price_s
-    if not on_sale and redeem:
+    if quarantined:
+        title=_hesc(f"{name} ({_ptok}) — Unverified Source Record")
+    elif not on_sale and redeem:
         title=_hesc(f"{name} ({_ptok}) — Ended · Redeem by {redeem}")
     elif len(name)<=24:
         title=_hesc(f"{name} ({_ptok}) — FL Scratch-Off Odds & Prizes Left")
@@ -572,9 +655,12 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
         title=_hesc(f"{name} ({_ptok}) — FL Scratch-Off Odds")
     # No literal date in the meta description: Google caches snippets between recrawls, so a baked
     # date reads stale. Live numbers stay (they lift CTR); the visible page carries the real date.
-    if on_sale:
-        desc=(f"{name}: {price_s} Florida scratch-off — {rem_s} top prizes left, EV {ev_s}"
-              +(f", Value Score {sc}/100" if sc is not None else "")+". Live odds and prize counts, updated daily. Not affiliated with the Florida Lottery.")
+    if quarantined:
+        desc=(f"{name}: archived, unverified source record. Inconsistent source data is retained for transparency and excluded from recommendations. Verify with the Florida Lottery.")
+    elif on_sale:
+        desc=(f"{name}: {price_s} Florida scratch-off — {rem_s} top prizes left"
+              +(f", estimated payout {ev_s}" if evraw is not None else "")
+              +". Published odds and source prize counts; estimates are not predictions. Independent of the Florida Lottery.")
     else:
         desc=(f"{name}: this {price_s} Florida scratch-off has ended"
               +(f" — winning tickets can still be redeemed through {redeem}" if redeem else "")
@@ -594,10 +680,23 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
                 +'<td class="r">'+(f"{int(tot):,}" if isinstance(tot,(int,float)) else "&#8212;")+"</td>"
                 +'<td class="r">'+(f"{int(rem):,}" if isinstance(rem,(int,float)) else "&#8212;")+"</td></tr>")
     tier_table=(f'<h2>Prize tiers &amp; odds</h2><table><thead><tr><th>Prize</th><th class="r">Odds</th><th class="r">Total printed</th><th class="r">Remaining</th></tr></thead><tbody>{trows}</tbody></table>' if trows else "")
-    if on_sale:
-        lead=(f'<p class="lead">{name_e} is a {price_s} Florida Lottery scratch-off game with a {top_disp} top prize and overall odds of {odds_s}. '
+    quality_note=""
+    if quarantined:
+        report_day=iso_date(g.get("last_queried")); launch_day=iso_date(g.get("launch_date"))
+        friendly_reason=(f'The winner report is dated {_hesc(report_day)}, before the recorded launch date of {_hesc(launch_day)}. '
+                         'Those dates do not describe a verified current game.'
+                         if report_day and launch_day and report_day<launch_day else
+                         'The official source values conflict or are incomplete, so this game cannot be verified for a current comparison.')
+        quality_note=('<aside class="source-warning" role="note"><h2>Archived, unverified source record</h2>'
+                      '<p>This record is excluded from recommendations. Do not use its odds, prize counts, or dates as current purchase information.</p>'
+                      '<p>'+friendly_reason+'</p></aside>')
+        lead=(f'<p class="lead">The {name_e} source record is preserved below for reference and transparency. '
+              'Its prize tiers have not been verified as a usable current game record.</p>')
+        ended_note=""
+    elif on_sale:
+        lead=(f'<p class="lead">{name_e} is a {price_s} Florida Lottery scratch-off game with a {top_disp} top prize and published overall odds of {odds_s}. '
               +(f'As of {lq}, {rem_s} top prizes remain' if tp_rem is not None else 'See the live prize table below')
-              +(f' and its expected value is {ev_s} — a Value Score of {sc}/100.' if sc is not None else '.')+"</p>")
+              +(f' and its estimated payout is {ev_s}.' if evraw is not None else '.')+"</p>")
         ended_note=""
     else:
         lead=(f'<p class="lead">{name_e} was a {price_s} Florida Lottery scratch-off game with a {top_disp} top prize and overall odds of {odds_s}. '
@@ -606,26 +705,26 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
               f'<b>This game has ended</b> — it is no longer sold in stores.'
               +(f' Winning tickets can still be redeemed through <b>{redeem}</b>; after that date prizes are forfeited.' if redeem else ' Check your ticket promptly — redemption windows close after sales end.')
               +' <a href="/florida-scratch-offs-ending-soon">See all ended games and deadlines</a>.</p>')
-    if evraw is not None and evraw>=1.0:
-        meaning=('<p class="muted">Expected value is how much of each $1 comes back on average across every remaining ticket. '
-                 'Unusually, this game currently shows <b>positive</b> expected value on its remaining tickets &#8212; a temporary artifact of a nearly sold-out prize pool, not a way to beat the game. '
-                 'It can flip negative overnight as more tickets sell, no one can buy every remaining ticket, and cash-option winners take roughly 60&#8211;65% of the advertised prize. '
-                 'Odds and prize counts change constantly; verify with the Florida Lottery before buying.</p>')
-    else:
-        meaning=('<p class="muted">Expected value is how much of each $1 comes back on average across every remaining ticket. '
-                 'Like every scratch-off, this game is negative expected value by design — a higher Value Score just means less-bad, not a way to win. '
-                 'Odds and prize counts change constantly; verify with the Florida Lottery before buying.</p>')
+    meaning=('<p class="muted">Estimated payout is a modeled average per $1 based on unclaimed prizes and an estimated ticket count. '
+             'The number of unsold tickets is not published; claim delays and lower cash-option payouts can affect actual returns. '
+             'It is not a prediction, a probability of winning, or a profitable strategy. '
+             '<a href="/#methodology">Read the model assumptions</a> and verify current details with the Florida Lottery.</p>')
+    if evraw is not None and evraw>=1.0 and not quarantined:
+        meaning+='<p class="muted">An estimate above $1 can depend on a small number of unclaimed large prizes and change before a ticket is purchased. It does not establish a real buying advantage.</p>'
     life=""
     if launch or redeem:
-        life='<p class="muted">'+((f"On sale since {launch}. " if launch else "")+(f"Winning tickets are redeemable through {redeem}." if redeem else "")).strip()+"</p>"
+        life='<p class="muted">'+((f"Source-reported launch date: {launch}. " if launch else "")+(f"Source-reported redemption date: {redeem}." if redeem else "")).strip()+"</p>"
+        if quarantined: life+='<p class="muted">These conflicting source dates are retained only as an archival record. Verify the actual game status and deadlines with the Florida Lottery.</p>'
     rel=""
-    if related:
+    if related and not quarantined:
         rel='<div class="rel"><b>Other '+price_s+' Florida scratch-offs:</b><br>'+" ".join(f'<a href="/g/{_hesc(rn)}">{_hesc(rnm)}</a>' for rn,rnm in related)+'</div>'
     hub='<div class="rel"><b>Compare all games:</b> <a href="/best-value">Best value now</a> &#183; '
     if price is not None:
         hub+=f'<a href="/florida-{int(price)}-scratch-offs">All ${int(price)} games</a> &#183; '
     hub+='<a href="/florida-scratch-offs-most-prizes-left">Most prizes left</a> &#183; <a href="/florida-scratch-offs-ending-soon">Ending soon</a></div>'
     pb=_pricebar(prices) if prices else ""
+    game_cta=(f'<p><a class="cta" href="https://floridalottery.com/games/scratch-offs/view?id={no}">Verify the official game record &#8594;</a></p>'
+              if quarantined else f'<p><a class="cta" href="/#game/{no}">Explore this game in the comparison tool &#8594;</a></p>')
     import json as _json
     ld=_json.dumps({"@context":"https://schema.org","@graph":[
         {"@type":"BreadcrumbList","itemListElement":[
@@ -661,10 +760,11 @@ def _stub_html(g,tiers,og_image,related=None,prices=None):
 <main>
 <p class="muted"><a href="/">Florida Scratch-Off Statistician</a> &rsaquo; <a href="/best-value">Best value</a> &rsaquo; {name_e}</p>
 <h1>{name_e}{_idn} &#8212; Florida Scratch-Off</h1>
-<p class="muted">Updated {lq} &#183; data direct from the <a href="https://floridalottery.com/games/scratch-offs/view?id={no}" rel="noopener">official Florida Lottery game page</a></p>
+<p class="muted">Winner report dated {lq} &#183; <a href="https://floridalottery.com/games/scratch-offs/view?id={no}" rel="noopener">official Florida Lottery game source</a></p>
+{quality_note}
 {ended_note}
 {lead}
-<p><a class="cta" href="/#game/{no}">Open the interactive version with charts &amp; winners &#8594;</a></p>
+{game_cta}
 {tier_table}
 {life}
 {meaning}
@@ -727,7 +827,8 @@ def _game_row(g,cols):
     ev=g.get("value_per_dollar_now"); tpr=g.get("top_prizes_remaining"); tpt=g.get("top_prizes_total")
     _d=(str(g.get("game_name") or "").strip().lower(),(int(price) if price is not None else None)) in _DUP_KEYS
     cellmap={
-        "game":f'<td><a href="/g/{no}">{nm}{f" (#{no})" if _d else ""}</a></td>',
+        "game":(f'<td><a href="/g/{no}">{nm}{f" (#{no})" if _d else ""}</a></td>'
+                if g.get("link_available") is not False else f'<td>{nm}</td>'),
         "price":'<td class="r">$'+(f"{price:.0f}" if price is not None else "?")+"</td>",
         "score":'<td class="r">'+(str(sc) if sc is not None else "&#8212;")+"</td>",
         "ev":'<td class="r">'+(f"${ev:.2f}" if ev is not None else "&#8212;")+"</td>",
@@ -736,6 +837,8 @@ def _game_row(g,cols):
         "odds":'<td class="r">'+(f"1 in {g.get('overall_odds_1_in')}" if g.get("overall_odds_1_in") is not None else "&#8212;")+"</td>",
         "pctleft":'<td class="r">'+(f"{g.get('pct_value_remaining'):.0f}%" if g.get("pct_value_remaining") is not None else "&#8212;")+"</td>",
         "redeem":"<td>"+_hesc((g.get("redemption_date") or "")[:10] or "&#8212;")+"</td>",
+        "sell":"<td>"+_hesc((g.get("end_date") or "")[:10] or "—")+"</td>",
+        "deadline_status":"<td>"+_hesc({"upcoming":"Sales ending","redeemable":"Redeemable"}.get(g.get("deadline_status"),"Expired"))+"</td>",
     }
     return "<tr>"+"".join(cellmap[c] for c in cols)+"</tr>"
 
@@ -750,75 +853,89 @@ def write_landing_pages(D):
         _LTIERS=D.get("tiers") or {}
         games=[g for g in (D.get("games") or []) if g.get("game_no")]
         onsale=[g for g in games if g.get("on_sale")]
+        recommendable=[g for g in onsale if g.get("recommendation_eligible") is not False
+                       and g.get("value_per_dollar_now") is not None]
         prices=sorted({int(g["ticket_price"]) for g in games if g.get("ticket_price")})
         built=(D.get("meta") or {}).get("built","")
-        def score(g): return _value_score(g,_LTIERS.get(str(g.get("game_no")),[]))
         def tbl(rows,cols,head):
+            if not rows: return '<p class="muted">No verified games match this list in the latest source snapshot.</p>'
             return "<table><thead><tr>"+head+"</tr></thead><tbody>"+"".join(_game_row(g,cols) for g in rows)+"</tbody></table>"
         def write(path,html):
             with open(os.path.join(PUB,path.lstrip("/")+".html"),"w",encoding="utf-8") as f: f.write(html)
 
-        bv=[g for g in onsale if g.get("value_per_dollar_now") is not None]; bv.sort(key=lambda g:-g["value_per_dollar_now"])
-        head='<th>Game</th><th class="r">Price</th><th class="r">Value Score</th><th class="r">EV per $1</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">% value left</th>'
-        cols=["game","price","score","ev","top","tpr","pctleft"]
+        bv=sorted(recommendable,key=lambda g:(-g["value_per_dollar_now"],str(g["game_no"])))
+        head='<th>Game</th><th class="r">Price</th><th class="r">Est. payout per $1</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">% value left</th>'
+        cols=["game","price","ev","top","tpr","pctleft"]
         top10=", ".join(f'<a href="/g/{_hesc(g["game_no"])}">{_hesc(g["game_name"])}</a>' for g in bv[:10])
-        intro=(f'<p class="lead">The Florida scratch-off games with the most prize value left per dollar right now, ranked by expected value. Updated {built}.</p>'
-               '<p class="muted">Value Score (0&#8211;100) blends current expected value, profit odds, freshness, and jackpot health. Every scratch-off is negative expected value &#8212; the best games return about $0.80&#8211;0.92 per $1, so &ldquo;best value&rdquo; means least-bad, never profitable. Play responsibly.</p>'
+        intro=(f'<p class="lead">Verified Florida scratch-off games ranked by estimated payout per $1, highest first. Source snapshot {built}.</p>'
+               '<p class="muted">Estimated payout is a modeled average based on unclaimed prizes, not a prediction or a chance of winning. The number of unsold tickets is not published; claim delays and cash-option payouts can change actual returns. Each game is designed to lose money over time. Play responsibly.</p>'
                +(f'<p><b>Top 10 right now:</b> {top10}.</p>' if top10 else ""))
         write("/best-value",_landing_html("Best-Value Florida Scratch-Off Tickets to Buy (2026) — Ranked",
-            f"Florida scratch-offs ranked by expected value and top prizes remaining — find the best value right now. Independent, ad-free, updated {built}.",
+            f"Verified Florida scratch-offs ranked by estimated payout per $1, with top prizes remaining. Independent and free. Source snapshot {built}.",
             "/best-value","Best-Value Florida Scratch-Offs Right Now",intro,tbl(bv,cols,head),prices,
             itemlist=[(g["game_no"],_dnm(g)) for g in bv[:25]]))
 
         for p in prices:
-            gp=[g for g in onsale if g.get("ticket_price") and int(g["ticket_price"])==p]; gp.sort(key=lambda g:-((score(g) or -1)))
-            head2='<th>Game</th><th class="r">Overall odds</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">EV per $1</th><th class="r">Value Score</th>'
-            cols2=["game","odds","top","tpr","ev","score"]
-            intro2=(f'<p class="lead">Every active ${p} Florida Lottery scratch-off, ranked by value. Updated {built}.</p>'
-                    f'<p class="muted">All active ${p} games below, with overall odds, top prize, top prizes remaining, and expected value. Every scratch-off is negative EV; a higher Value Score is less-bad, not profitable. Play responsibly.</p>')
+            gp=[g for g in recommendable if g.get("ticket_price") and int(g["ticket_price"])==p]
+            gp.sort(key=lambda g:(-g["value_per_dollar_now"],str(g["game_no"])))
+            head2='<th>Game</th><th class="r">Published overall odds</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">Est. payout per $1</th>'
+            cols2=["game","odds","top","tpr","ev"]
+            intro2=(f'<p class="lead">Verified active ${p} Florida Lottery scratch-offs, ranked by estimated payout per $1. Source snapshot {built}.</p>'
+                    '<p class="muted">Published odds describe the original game design. Estimated payout uses unclaimed prizes and an estimated ticket count, so it is not a prediction or the chance of winning. Cash-option payouts may be lower than advertised prizes. Play responsibly.</p>')
             write(f"/florida-{p}-scratch-offs",_landing_html(f"Florida ${p} Scratch-Off Tickets — Odds, Best Value & Prizes Left",
-                f"Every Florida ${p} scratch-off ranked by odds, expected value, and top prizes remaining. Independent live stats, updated {built}.",
+                f"Verified Florida ${p} scratch-offs ranked by estimated payout per $1, with published odds and top prizes remaining. Source snapshot {built}.",
                 f"/florida-{p}-scratch-offs",f"Florida ${p} Scratch-Off Tickets",intro2,tbl(gp,cols2,head2),prices,
                 itemlist=[(g["game_no"],_dnm(g)) for g in gp[:25]]))
 
         mp=[g for g in onsale if (g.get("top_prizes_remaining") or 0)>0]; mp.sort(key=lambda g:(-(g.get("top_prizes_remaining") or 0),-(g.get("top_prize_value_num") or 0)))
-        head3='<th>Game</th><th class="r">Price</th><th>Top prize</th><th class="r">Top prizes left</th><th class="r">Value Score</th>'
-        cols3=["game","price","top","tpr","score"]
+        head3='<th>Game</th><th class="r">Price</th><th>Top prize</th><th class="r">Top prizes left</th>'
+        cols3=["game","price","top","tpr"]
         intro3=(f'<p class="lead">Active Florida scratch-offs with the most top prizes still unclaimed, updated {built}.</p>'
-                '<p class="muted">More top prizes remaining does not mean better odds &#8212; a game can have many left simply because few tickets have sold. Cross-check the Value Score and play responsibly.</p>')
+                '<p class="muted">More top prizes remaining does not mean better odds &#8212; a game can have many left simply because few tickets have sold. Compare published odds and estimated payout separately, and play responsibly.</p>')
         write("/florida-scratch-offs-most-prizes-left",_landing_html("Florida Scratch-Offs With the Most Top Prizes Remaining (2026)",
             f"Active Florida scratch-off games ranked by top prizes still unclaimed, updated {built}. Independent live stats — play responsibly.",
             "/florida-scratch-offs-most-prizes-left","Florida Scratch-Offs With the Most Top Prizes Left",intro3,tbl(mp,cols3,head3),prices,
             itemlist=[(g["game_no"],_dnm(g)) for g in mp[:25]]))
 
         # /new-florida-scratch-offs — recent launches, newest first (real recurring query; no page existed)
-        ng=[g for g in onsale if g.get("launch_date")]; ng.sort(key=lambda g:g["launch_date"],reverse=True)
-        headN='<th>Game</th><th class="r">Launched</th><th class="r">Price</th><th>Top prize</th><th class="r">Overall odds</th><th class="r">Value Score</th>'
+        ng=[g for g in recommendable if g.get("launch_date")]; ng.sort(key=lambda g:g["launch_date"],reverse=True)
+        headN='<th>Game</th><th class="r">Launched</th><th class="r">Price</th><th>Top prize</th><th class="r">Published overall odds</th>'
         def _rowN(g):
             no=_hesc(g.get("game_no") or "")
             return ("<tr>"+f'<td><a href="/g/{no}">{_hesc(_dnm(g))}</a></td>'
                     +'<td class="r">'+_hesc((g.get("launch_date") or "")[:10])+"</td>"
                     +'<td class="r">$'+(f"{g['ticket_price']:.0f}" if g.get("ticket_price") else "?")+"</td>"
                     +"<td>"+_hesc(g.get("top_prize_display") or _moneyc(g.get("top_prize_value_num")))+"</td>"
-                    +'<td class="r">'+(f"1 in {g.get('overall_odds_1_in')}" if g.get("overall_odds_1_in") is not None else "&#8212;")+"</td>"
-                    +'<td class="r">'+(str(_value_score(g,_LTIERS.get(str(g.get("game_no")),[])) or "&#8212;"))+"</td></tr>")
-        tblN="<table><thead><tr>"+headN+"</tr></thead><tbody>"+"".join(_rowN(g) for g in ng)+"</tbody></table>"
-        introN=(f'<p class="lead">Every active Florida Lottery scratch-off, newest first. The most recent launch was {ng[0]["launch_date"][:10]}. Updated {built}.</p>'
-                '<p class="muted">New games start with every printed prize still in play, so their live odds match the printed odds exactly. That does not make them winners &#8212; every scratch-off is negative expected value from day one. Check the Value Score before buying, and play responsibly.</p>') if ng else '<p class="lead">No active games.</p>'
+                    +'<td class="r">'+(f"1 in {g.get('overall_odds_1_in')}" if g.get("overall_odds_1_in") is not None else "&#8212;")+"</td></tr>")
+        tblN=("<table><thead><tr>"+headN+"</tr></thead><tbody>"+"".join(_rowN(g) for g in ng)+"</tbody></table>"
+              if ng else '<p class="muted">No verified active games are available in the latest source snapshot.</p>')
+        introN=(f'<p class="lead">Verified active Florida Lottery scratch-offs, newest first. The most recent launch was {ng[0]["launch_date"][:10]}. Source snapshot {built}.</p>'
+                '<p class="muted">New does not mean better odds. Published odds describe the original game design; remaining prize counts do not reveal an exact count of unsold tickets. Each game is designed to lose money over time. Play responsibly.</p>') if ng else '<p class="lead">No verified active games.</p>'
         write("/new-florida-scratch-offs",_landing_html("New Florida Scratch-Off Games (2026) — Newest Launches & Odds",
-            "Every new Florida scratch-off, newest first, with launch dates, odds, top prizes, and value scores. Updated daily.",
+            "Verified new Florida scratch-offs, newest first, with launch dates, published odds and top prizes. Source data updates daily.",
             "/new-florida-scratch-offs","New Florida Scratch-Off Games",introN,tblN,prices,
             itemlist=[(g["game_no"],_dnm(g)) for g in ng[:25]]))
 
-        es=[g for g in games if (g.get("redemption_date") and not g.get("on_sale"))]; es.sort(key=lambda g:(g.get("redemption_date") or "9999"))
-        head4='<th>Game</th><th class="r">Price</th><th>Top prize</th><th class="r">Redeem by</th>'
-        cols4=["game","price","top","redeem"]
-        intro4=(f'<p class="lead">Florida scratch-off games that have ended sales &#8212; winning tickets are still redeemable until the deadline shown. Updated {built}.</p>'
-                '<p class="muted">After a game ends, prizes stay claimable only until the redemption deadline. Holding an old ticket from one of these games? Check it before the date passes.</p>')
+        by_id={str(g["game_no"]):g for g in games}
+        deadline_model=D.get("deadlines") or {}
+        if "items" not in deadline_model:
+            deadline_model=normalize_deadlines(games,deadline_model,built)
+        es=[]
+        for item in deadline_model.get("items") or []:
+            if item["status"]=="expired": continue
+            gid=item["id"]; game=by_id.get(gid,{})
+            es.append({**game,"game_no":gid,"game_name":item["name"],"ticket_price":item["price"],
+                       "end_date":item["last_sell"],"redemption_date":item["last_redeem"],"deadline_status":item["status"],
+                       "link_available":gid in by_id or os.path.exists(os.path.join(PUB,"g",gid+".html"))})
+        head4='<th>Game</th><th class="r">Price</th><th>Status</th><th>Sales end</th><th>Redeem by</th>'
+        cols4=["game","price","deadline_status","sell","redeem"]
+        intro4=(f'<p class="lead">Upcoming Florida scratch-off sales endings and deadlines for redeeming ended games. Updated {built}.</p>'
+                '<p class="muted">Sales end on the date shown; winning tickets remain redeemable through the separate redemption deadline. Verify dates with the Florida Lottery before relying on them.</p>')
+        deadline_table=tbl(es,cols4,head4) if es else '<p class="muted">No upcoming sales endings or unexpired redemption deadlines are currently listed by the source.</p>'
         write("/florida-scratch-offs-ending-soon",_landing_html("Florida Scratch-Offs Ending Soon — Redemption Deadlines (2026)",
-            f"Florida scratch-off games that ended sales and their ticket redemption deadlines, updated {built}. Do not let a winning ticket expire.",
-            "/florida-scratch-offs-ending-soon","Florida Scratch-Offs Ending Soon",intro4,tbl(es,cols4,head4),prices,
-            itemlist=[(g["game_no"],_dnm(g)) for g in es[:25]]))
+            f"Florida scratch-off sales end dates and ticket redemption deadlines, updated {built}. Do not let a winning ticket expire.",
+            "/florida-scratch-offs-ending-soon","Florida Scratch-Offs Ending Soon",intro4,deadline_table,prices,
+            itemlist=[(g["game_no"],_dnm(g)) for g in es[:25] if g["link_available"]]))
         print(f"· wrote {4+len(prices)} SEO landing pages")
     except Exception as e:
         print("   write_landing_pages failed (non-fatal):",e)
@@ -837,14 +954,8 @@ def write_stub_pages(D):
             have_pil=True
         except Exception:
             have_pil=False
-        live={str(g.get("game_no")) for g in (D.get("games") or []) if g.get("game_no")}
-        for _dir,_exts in ((gdir,(".html",)),(odir,(".svg",".png"))):
-            try:
-                for fn in os.listdir(_dir):
-                    stem,ext=os.path.splitext(fn)
-                    if ext in _exts and stem not in live:
-                        os.remove(os.path.join(_dir,fn))
-            except Exception: pass
+        # Games leaving the active API retain their last canonical page and share card.
+        # Discovery decoration marks them archived instead of turning earned links into 404s.
         global _ALL_PRICES,_DUP_KEYS
         _ALL_PRICES=sorted({int(g['ticket_price']) for g in (D.get('games') or []) if g.get('ticket_price')})
         _seen={}
@@ -869,12 +980,10 @@ def write_stub_pages(D):
                 # The SVG and stub-HTML are deterministic (identical bytes on any machine) so writing
                 # them every run causes NO git churn. The PNG rasterizer is NOT identical across
                 # environments (Mac vs CI Pillow), so ONLY the PNG is content-addressed: regenerate it
-                # solely when its source SVG changed (or it's missing). This keeps cards churn-free
-                # while still propagating any stub-template change (e.g. canonical/OG tags).
-                try: prior_svg=open(svg_path,encoding="utf-8").read()
-                except Exception: prior_svg=None
+                # solely when its embedded SVG fingerprint differs (or it's missing).
+                # An SVG-only build cannot accidentally mark an old PNG as current.
                 have_png=have_pil and os.path.exists(png_path)
-                if have_pil and (prior_svg!=svg or not have_png):
+                if have_pil and not _png_matches_svg(png_path,svg):
                     if _svg_to_png(svg,png_path): have_png=True
                 with open(svg_path,"w",encoding="utf-8") as f:
                     f.write(svg)
@@ -900,12 +1009,20 @@ def write_stub_pages(D):
         _indexnow(urls)
     except Exception as e:
         print("   write_stub_pages failed (non-fatal):",e)
+def _png_matches_svg(path,svg):
+    """Validate the PNG's actual source, even after an earlier SVG-only build."""
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            return image.info.get("flss_svg_sha256")==hashlib.sha256(svg.encode("utf-8")).hexdigest()
+    except (ImportError,OSError,ValueError): return False
+
 def _svg_to_png(svg,path):
     """Best-effort rasterize the OG SVG to a 1200x630 PNG using Pillow, WITHOUT any
        external SVG renderer: re-draw the card natively with PIL primitives so it works
        even though Pillow cannot parse SVG. Returns True on success."""
     try:
-        from PIL import Image,ImageDraw,ImageFont
+        from PIL import Image,ImageDraw,ImageFont,PngImagePlugin
     except Exception:
         return False
     try:
@@ -935,12 +1052,15 @@ def _svg_to_png(svg,path):
             except Exception: continue
             txt=html.unescape(txt)
             d.text((xi,yi-sz),txt,fill=hexrgb(fill),font=font(sz,sz>=40))
-        img.save(path,"PNG")
+        provenance=PngImagePlugin.PngInfo()
+        provenance.add_text("flss_svg_sha256",hashlib.sha256(svg.encode("utf-8")).hexdigest())
+        img.save(path,"PNG",pnginfo=provenance)
         return True
     except Exception:
         return False
 def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     con.row_factory=sqlite3.Row; D={}
+    today=time.strftime("%Y-%m-%d")
     D["games"]=[{k:r[k] for k in r.keys()} for r in con.execute("""SELECT g.*,a.est_tickets_printed,a.est_tickets_remaining,
       a.pct_tickets_remaining,a.value_original,a.value_remaining,a.pct_value_remaining,a.ev_per_ticket_now,
       a.value_per_dollar_original,a.value_per_dollar_now FROM games g LEFT JOIN ticket_analysis a USING(game_no) ORDER BY g.game_no""")]
@@ -1007,10 +1127,16 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     types=[{"name":t,"stores":tc[t],"winners":wtc.get(t,0),"per1k":round(1000*wtc.get(t,0)/tc[t],1),"lift":round((1000*wtc.get(t,0)/tc[t])/base,2)} for t in tc if tc[t]>50]
     types.sort(key=lambda x:-x["lift"])
     D["retail"]={"total":total,"itvm":itvm,"base_per1k":round(base,1),"winners_matched":len(wr),"chains":chains,"types":types}
-    D["deadlines"]={"ending":[{"id":str(e.get("Id")),"name":e.get("GameName"),"price":e.get("TicketPrice"),
-        "last_sell":(e.get("LastDayToSell") or "")[:10],"last_redeem":(e.get("LastDayToRedeem") or "")[:10]}
-        for e in (deadlines.get("ending") or [])],
-      "expiring":deadlines.get("expiring") or []}
+    D["deadlines"]=normalize_deadlines(D["games"],deadlines,today)
+    closure_by_id={item["id"]:item for item in D["deadlines"]["items"]}
+    for game in D["games"]:
+        closure=closure_by_id.get(game["game_no"])
+        if closure:
+            if closure["last_sell"]:
+                game["end_date"]=closure["last_sell"]
+                game["on_sale"]=int(closure["last_sell"]>=today)
+            if closure["last_redeem"]: game["redemption_date"]=closure["last_redeem"]
+        game.update(game_quality(game,today))
     D["fl"]=fl_geo
     on=[g for g in D["games"] if g["on_sale"]]
     D["meta"]={"built":time.strftime("%Y-%m-%d"),
@@ -1018,10 +1144,13 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
       "n_games":len(D["games"]),"n_winners":len(D["winners"]),
       "on_sale":len(on),"tp_left":sum(g["top_prizes_remaining"] or 0 for g in on),
       "value_left":sum(g["value_remaining"] or 0 for g in on),
-      "winners_stale":len(PDF_CACHED)}   # games whose winners came from cache (source unreachable) — honest freshness
+      "winners_stale":len(PDF_CACHED),   # games whose winners came from cache (source unreachable) — honest freshness
+      "quarantined":sum(g["source_status"]=="quarantined" for g in D["games"]),
+      "recommendation_eligible":sum(g["recommendation_eligible"] for g in D["games"])}
     # append nightly history snapshot (compact; grows ~2KB/day)
     hpath=os.path.join(PUB,"history.json")
-    try: hist=json.load(open(hpath))
+    try:
+        with open(hpath,encoding="utf-8") as history_file: hist=json.load(history_file)
     except FileNotFoundError: hist={"days":[]}   # corrupt JSON must crash: keeps the committed archive
     today=time.strftime("%Y-%m-%d")
     _nn=lambda x:max(0,x) if isinstance(x,(int,float)) else x   # top-prize counts are never negative
@@ -1032,13 +1161,17 @@ def emit(con,zipmap,ccent,z2c,fl_geo,deadlines):
     else: hist["days"].append({"d":today,"g":snap_g})
     hist["days"]=hist["days"][-1095:]  # keep 3 years; extras.js fetches the whole file per visit
     _tmp=hpath+".tmp"
-    json.dump(hist,open(_tmp,"w"),separators=(",",":")); os.replace(_tmp,hpath)
+    with open(_tmp,"w",encoding="utf-8") as history_file: json.dump(hist,history_file,separators=(",",":"))
+    os.replace(_tmp,hpath)
     _dpath=os.path.join(PUB,"data.js"); _dtmp=_dpath+".tmp"
     with open(_dtmp,"w") as f:
         f.write("const DATA="); json.dump(D,f,separators=(",",":")); f.write(";")
     os.replace(_dtmp,_dpath)
     # per-game OG stub pages + social share cards (defensive; never breaks the build)
     write_stub_pages(D)
+    # Every refresh rebuilds the HTML-first home and the shared discovery shell.
+    from pipeline.build_site import build_site
+    build_site(D)
     return D["meta"]
 
 def main():

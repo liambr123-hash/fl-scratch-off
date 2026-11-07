@@ -1,37 +1,62 @@
 # How the data stays fresh
 
-The site rebuilds itself nightly on **GitHub Actions** (`.github/workflows/refresh.yml`,
-cron 09:20 UTC). `refresh.py` pulls games, odds, EV, deadlines, retailers and winners
-from the Florida Lottery, regenerates `public/data.js` + `public/history.json` + the OG
-share pages, commits, and pushes — which triggers Cloudflare to redeploy. No local
-machine is involved.
+GitHub Actions runs `pipeline/refresh.py` using the schedule in
+`.github/workflows/refresh.yml`:
 
-## Why the winner-PDF fetch is defensive
+| Opportunity | UTC | Eastern Standard Time | Eastern Daylight Time |
+| --- | --- | --- | --- |
+| Primary refresh | 12:07 | 7:07 a.m. | 8:07 a.m. |
+| Later safety net | 16:47 | 11:47 a.m. | 12:47 p.m. |
 
-The winner-PDF server (`files.floridalottery.com`) TLS-fingerprints its clients and once
-rejected GitHub's runners with `SSLV3_ALERT_HANDSHAKE_FAILURE`. So `fetch_pdfs` tries a
-3-rung ladder — `urllib` → TLS-1.2 browser ciphers → `curl` — and **curl currently gets
-through** on CI. Each download must be a complete PDF (`%%EOF` trailer); a truncated or
-blocked file is rejected and that game falls back to the committed **last-known-good
-cache** at `pipeline/pdfcache/`. Successful live fetches refresh that cache, so it stays
-current on its own.
+The primary slot stays after the historically observed overnight source-update
+window, which finished around 6:20 a.m. Eastern, in either season. GitHub may delay
+or skip scheduled dispatch, so these are refresh opportunities, not promised
+publication times. The site shows the actual source build timestamp. Both
+scheduled runs execute; the later run is not conditional on a previous failure.
 
-Net effect: games/EV/deadlines refresh live every day; winners refresh live too while the
-ladder works, and degrade gracefully to the cache (never to nothing) if the source blocks
-or serves a broken file.
+## What a refresh rebuilds
 
-## Fail-safe behavior
+`refresh.py` fetches the Florida Lottery's public game feed, prize tiers, winner
+reports and supporting datasets. It applies data-quality and prize-identity
+checks, writes the shared snapshot and history, and regenerates game/search
+pages. It then calls `build_site(D)`, which rebuilds the HTML-first homepage,
+`public/data.json`, `public/games.csv`, and the shared landing-page shell from that
+same snapshot. Removed game pages are retained and labeled as archived snapshots.
 
-If the whole upstream is degraded — empty games list, winner coverage collapse, retailer
-census collapse — the publish guards abort with a nonzero exit. The commit step is skipped,
-**nothing is pushed, and the live site keeps serving yesterday's data.** A failed run never
-replaces good data with bad.
+The workflow stages **all of `public/` plus `pipeline/pdfcache/`**. That includes
+`data.js`, history, homepage HTML, JSON/CSV downloads, game/search pages, share
+cards, sitemap and robots files. Changed output is committed to `main`; the
+existing Cloudflare Git deployment connection must use the same current source.
+No local Mac is needed for scheduled data refreshes.
 
-## If a run ever fails
+## Why winner-PDF fetching is defensive
 
-Open the repo on github.com → **Actions** → the failed run → the "Rebuild data" step. The
-log is self-diagnosing (unbuffered, with `PDF failures ×N: <reason>` summaries). The most
-likely future failure is the PDF server tightening its block so all three rungs fail — in
-that case the run stays green on the cache but the log will say
-`PDF source unreachable for N games`. Turn on **Settings → Notifications → email on failed
-workflow runs** to hear about aborts without watching.
+The winner-PDF server has rejected some CI TLS clients in the past. The fetcher
+tries stock `urllib`, a TLS 1.2 browser-cipher configuration, then `curl`. It checks
+that each response is a complete PDF ending in `%%EOF`. Successful live downloads
+refresh the committed last-known-good cache in `pipeline/pdfcache/`.
+
+If a PDF cannot be fetched, that game's report can fall back to its cached copy.
+That is not a fresh winner report: source limitations and stale report dates must
+remain visible, and limited records are excluded from recommendations. A green
+workflow is not proof that every upstream source was fresh or agreed.
+
+## If a run fails
+
+Major source-coverage checks abort the process with a nonzero exit. The workflow's
+commit step is skipped, so the live site retains its last successful published
+snapshot. It may be older than yesterday if failures continue.
+
+Open the repository's Actions page, select the failed run, and inspect the
+“Rebuild data from the Florida Lottery API” step. PDF fetch failures and fallback
+counts appear in its log. Check the actual source snapshot date and visible
+quality notes as well as job status. The owner may enable GitHub's normal failed
+workflow notifications; no new email or notification automation is installed by
+this project.
+
+## Private sponsorship cleanup is separate
+
+The published Worker has its own daily Cron Trigger for deleting inquiry rows
+older than 30 days. This private D1 cleanup does not use the GitHub data-refresh
+job and does not publish inquiry data. See `../DEPLOYMENT.md` for owner-only
+review queries and publication details.
