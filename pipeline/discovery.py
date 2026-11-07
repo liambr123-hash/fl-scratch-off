@@ -45,9 +45,9 @@ def _canonical(document: str) -> str | None:
 
 
 def _header() -> str:
-    links = [("tickets", "All tickets"), ("new-games", "New games"),
-             ("changes", "What's changed"), ("deadlines", "Deadlines"),
-             ("methodology", "How it works"), ("support", "Support")]
+    links = [("tickets", "Tickets"), ("new-games", "New"),
+             ("changes", "Claims"), ("deadlines", "Dates"),
+             ("methodology", "Help"), ("support", "Support")]
     nav = "".join(f'<a href="/#{target}">{label}</a>' for target, label in links)
     return ('<a class="skip-link" href="#main-content">Skip to content</a>\n'
             '<header class="site-header"><a class="site-brand" href="/" aria-label="FL Scratch Stats home">'
@@ -130,7 +130,8 @@ def _decorate(document: str, path: str, archived: bool, quarantined: bool = Fals
     # and JSON-LD intact, replacing only visual styles with the shared stylesheet.
     head = re.sub(r"<style\b[^>]*>.*?</style>\s*", "", head, flags=re.I | re.S)
     head = re.sub(r"<link\b[^>]*>", lambda m: "" if (_attribute(m.group(0), "rel") or "").lower() == "stylesheet" else m.group(0), head, flags=re.I | re.S)
-    head = head.strip() + '\n<link rel="stylesheet" href="/assets/site.css">'
+    head = (head.strip() + '\n<link rel="stylesheet" href="/assets/site.css">'
+            '\n<link rel="stylesheet" href="/assets/visual.css?v=3">')
     modified = _last_modified(head)
     content = main_match.group(1).strip()
     if _START in content and _END in content:
@@ -143,7 +144,7 @@ def _decorate(document: str, path: str, archived: bool, quarantined: bool = Fals
         content = "<h1>" + html.escape(heading) + "</h1>\n" + content
     # Replace the legacy two-app jump with the real inline-detail contract.
     content = re.sub(r'(<a\b[^>]*href=)([\"\'])/#game/([A-Za-z0-9_-]+)\2([^>]*>).*?</a>',
-                     lambda m: m.group(1) + '"/?game=' + m.group(3) + '#tickets"' + m.group(4) + 'Explore this game in the comparison tool &rarr;</a>',
+                     lambda m: m.group(1) + '"/?game=' + m.group(3) + '#tickets"' + m.group(4) + 'Open game &rarr;</a>',
                      content, flags=re.I | re.S)
     if archived or quarantined:
         # Archived or quarantined data must not gain a live-comparison link just
@@ -157,10 +158,11 @@ def _decorate(document: str, path: str, archived: bool, quarantined: bool = Fals
                    'Check the <a href="https://floridalottery.com/games/scratch-offs">official Florida Lottery</a> '
                    'for current status and deadlines.</p></aside>' + _ARCHIVE_END + "\n" + content)
     cta = "/#tickets" if archived or quarantined else _interactive_url(path)
-    cta_label = "Explore verified games" if quarantined else "Back to the comparison tool"
-    bottom = '<p class="landing-return"><a class="button" href="' + html.escape(cta, quote=True) + '">' + cta_label + ' &rarr;</a></p>'
+    cta_label = "Help" if path == "/about" else "Open game" if path.startswith("/g/") and not (archived or quarantined) else "See tickets"
+    top = '<p class="landing-top-cta"><a class="button primary" href="' + html.escape(cta, quote=True) + '">' + cta_label + '</a></p>'
+    bottom = '<p class="landing-return"><a class="button" href="/#tickets">All tickets</a></p>'
     body = (_header() + '\n<main id="main-content" class="landing-main"><article class="landing-content"'
-            + (' data-archived="true"' if archived else '') + '>' + _START + '\n' + content + '\n' + _END
+            + (' data-archived="true"' if archived else '') + '>' + top + _START + '\n' + content + '\n' + _END
             + bottom + '</article></main>\n' + _footer())
     return ('<!doctype html>\n<html lang="en"><head>\n' + head + '\n</head>\n'
             '<body class="landing-page">\n' + body + '\n</body></html>\n'), modified

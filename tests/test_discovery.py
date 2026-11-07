@@ -46,6 +46,13 @@ class LandingDiscoveryTests(unittest.TestCase):
         self.assertIn(UNIQUE_TABLE, output)
         self.assertIn('dateModified":"2026-10-20"', output)
         self.assertIn('href="/?game=1647#tickets"', output)
+        self.assertIn('<p class="landing-top-cta"><a class="button primary" href="/?game=1647#tickets">Open game</a></p>', output)
+        self.assertLess(output.index('class="landing-top-cta"'), output.index('<!-- discovery:content:start -->'))
+        self.assertIn('href="/#tickets">All tickets</a>', output)
+        self.assertLess(output.index('href="/assets/site.css"'), output.index('href="/assets/visual.css?v=3"'))
+        for target, label in [('tickets', 'Tickets'), ('new-games', 'New'), ('changes', 'Claims'),
+                              ('deadlines', 'Dates'), ('methodology', 'Help'), ('support', 'Support')]:
+            self.assertIn(f'href="/#{target}">{label}</a>', output)
         self.assertIn('href="/#support"', output)
         self.assertIn('href="#main-content"', output)
         self.assertEqual(output.count('<h1>'), 1)
@@ -62,6 +69,8 @@ class LandingDiscoveryTests(unittest.TestCase):
         decorate_landing_pages(self.public, self.data)
         self.assertEqual((self.public / 'g' / '1647.html').read_bytes(), first)
         self.assertEqual((self.public / 'sitemap.xml').read_bytes(), sitemap)
+        self.assertEqual(first.count(b'class="landing-top-cta"'), 1)
+        self.assertEqual(first.count(b'href="/assets/visual.css?v=3"'), 1)
 
     def test_missing_game_retains_snapshot_and_accurate_archival_metadata(self):
         # A prior URL is present on disk but no longer in today's feed/sitemap.
@@ -76,6 +85,7 @@ class LandingDiscoveryTests(unittest.TestCase):
         self.assertIn('The Price Is Right odds — archived snapshot', output)
         self.assertIn('href="https://flscratchstats.com/g/1518"', output)
         self.assertNotIn('/?game=1518', output)
+        self.assertIn('<p class="landing-top-cta"><a class="button primary" href="/#tickets">See tickets</a></p>', output)
         sitemap = ET.fromstring((self.public / 'sitemap.xml').read_text())
         namespace = {'s': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
         entry = next(item for item in sitemap.findall('s:url', namespace)
@@ -91,7 +101,9 @@ class LandingDiscoveryTests(unittest.TestCase):
         decorate_landing_pages(self.public, self.data)
         self.assertIn('<h1>About &amp; methodology</h1>', (self.public / 'about.html').read_text())
         self.assertIn('A unique method.', (self.public / 'about.html').read_text())
+        self.assertIn('<p class="landing-top-cta"><a class="button primary" href="/#methodology">Help</a></p>', (self.public / 'about.html').read_text())
         self.assertIn('href="/?price=10#tickets"', (self.public / 'florida-10-scratch-offs.html').read_text())
+        self.assertIn('<p class="landing-top-cta"><a class="button primary" href="/?price=10#tickets">See tickets</a></p>', (self.public / 'florida-10-scratch-offs.html').read_text())
 
     def test_quarantined_game_keeps_evidence_without_a_comparison_entry_link(self):
         content = ('<h1>Gold Rush Doubler</h1><p class="quality-note">'
@@ -107,7 +119,8 @@ class LandingDiscoveryTests(unittest.TestCase):
         self.assertIn('href="https://flscratchstats.com/g/1384"', output)
         self.assertIn('Estimated payout withheld.', output)
         self.assertIn(UNIQUE_TABLE, output)
-        self.assertIn('href="/#tickets">Explore verified games &rarr;</a>', output)
+        self.assertIn('<p class="landing-top-cta"><a class="button primary" href="/#tickets">See tickets</a></p>', output)
+        self.assertIn('href="/#tickets">All tickets</a>', output)
         self.assertNotIn('/?game=1384', output)
         self.assertNotIn('/#game/1384', output)
         self.assertNotIn('Archived game snapshot', output)
