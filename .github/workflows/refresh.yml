@@ -1,18 +1,17 @@
 name: Nightly data refresh
 
 on:
-  # The FL Lottery regenerates its game/winner data in a once-daily overnight batch, game by game,
-  # roughly 1:10-6:20am ET. There is no intraday update and no webhook — verified: ~160M prize
-  # counters were byte-identical between an 09:00 and a 15:00 UTC read. So we poll once, AFTER their
-  # batch finishes (never during, or we'd bake a half-updated snapshot), plus an afternoon safety net
-  # because GitHub silently delays/drops scheduled runs. A same-day rerun no-ops if nothing changed.
+  # Historical FL Lottery overnight updates finish around 6:20am Eastern. GitHub cron is UTC:
+  # 12:07 is 7:07am EST / 8:07am EDT, after that window in both seasons. The later run is a
+  # second refresh opportunity if the first is delayed or a source is temporarily unavailable.
+  # GitHub may delay scheduled dispatch; the website displays the actual source build timestamp.
   schedule:
-    - cron: "7 11 * * *"    # 7:07am ET — ~45min after the Lottery's batch completes (~6:20am ET)
-    - cron: "47 15 * * *"   # 11:47am ET safety net
+    - cron: "7 12 * * *"    # 7:07am EST / 8:07am EDT
+    - cron: "47 16 * * *"   # 11:47am EST / 12:47pm EDT safety net
   workflow_dispatch: {}      # lets you run it manually from the Actions tab
 
 permissions:
-  contents: write            # allow the bot to commit refreshed data.js
+  contents: write            # allow the bot to commit all generated public data and pages
 
 concurrency:
   group: refresh
@@ -40,7 +39,7 @@ jobs:
         run: |
           git config user.name  "data-refresh-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add -A public pipeline/pdfcache   # everything the pipeline writes (data, history, stubs, cards, landing pages, sitemap, robots)
+          git add -A public pipeline/pdfcache   # data/history, homepage/assets, JSON/CSV exports, game/search pages, cards, sitemap/robots, PDF cache
           if git diff --staged --quiet; then
             echo "No data changes today."
           else
