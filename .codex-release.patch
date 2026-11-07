@@ -436,7 +436,7 @@ index cbaebe9c..7bcdbc90 100644
 +review queries and publication details.
 diff --git a/pipeline/build_site.py b/pipeline/build_site.py
 new file mode 100644
-index 00000000..3ce14d15
+index 00000000..ff75f719
 --- /dev/null
 +++ b/pipeline/build_site.py
 @@ -0,0 +1,111 @@
@@ -531,7 +531,7 @@ index 00000000..3ce14d15
 +    (PUB/'index.html').write_text(text,encoding='utf-8')
 +    (PUB/'data.json').write_text(json.dumps(D,separators=(',',':')),encoding='utf-8')
 +    output=io.StringIO(); fields=['game_no','game_name','ticket_price','top_prize_display','top_prizes_remaining','top_prizes_total','overall_odds','value_per_dollar_now','launch_date','end_date','redemption_date','source_status']
-+    writer=csv.DictWriter(output,fieldnames=fields,extrasaction='ignore'); writer.writeheader()
++    writer=csv.DictWriter(output,fieldnames=fields,extrasaction='ignore',lineterminator='\n'); writer.writeheader()
 +    for g in games: writer.writerow({k:g.get(k) for k in fields})
 +    (PUB/'games.csv').write_text(output.getvalue(),encoding='utf-8')
 +    return len(verified)
